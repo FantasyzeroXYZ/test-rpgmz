@@ -10,20 +10,44 @@ body {
 }
 
 header { 
-    padding: 10px 20px; 
+    padding: 12px 20px; 
     background: #252526; 
     border-bottom: 1px solid #333; 
     display: flex; 
     align-items: center; 
+    justify-content: space-between;
     gap: 15px; 
     flex-wrap: wrap;
+    min-height: 50px;
+    flex-shrink: 0;
+}
+
+/* 标题和文件上传区域 */
+.header-left {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    flex-wrap: wrap;
+}
+
+.header-right {
+    display: flex;
+    align-items: center;
 }
 
 .container { 
     display: flex; 
     flex: 1; 
-    height: calc(100vh - 60px); 
+    min-height: 0; /* 关键：防止Flex溢出 */
     overflow: hidden;
+    flex-direction: row;
+}
+
+/* 手机端改为垂直布局 */
+@media (max-width: 768px) {
+    .container {
+        flex-direction: column;
+    }
 }
 
 .game-area { 
@@ -34,18 +58,89 @@ header {
     align-items: center; 
     position: relative; 
     min-width: 0;
+    min-height: 0;
+    padding: 10px;
+    overflow: hidden;
+}
+
+/* 游戏框架容器 - 保持宽高比 */
+.game-frame-container {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    position: relative;
 }
 
 iframe { 
-    width: 100%; 
-    height: 100%; 
+    max-width: 100%;
+    max-height: 100%;
     border: none; 
     background: #000;
+    object-fit: contain; /* 保持宽高比 */
+}
+
+/* 游戏尺寸控制面板 */
+.scale-controls {
+    position: absolute;
+    bottom: 15px;
+    right: 15px;
+    background: rgba(0, 0, 0, 0.8);
+    border-radius: 6px;
+    padding: 8px;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    z-index: 100;
+    backdrop-filter: blur(5px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.scale-btn {
+    width: 36px;
+    height: 36px;
+    background: #444;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    transition: background 0.2s;
+}
+
+.scale-btn:hover {
+    background: #555;
+}
+
+.current-scale {
+    color: white;
+    font-size: 13px;
+    padding: 0 10px;
+    min-width: 50px;
+    text-align: center;
+}
+
+.game-info {
+    position: absolute;
+    top: 15px;
+    left: 15px;
+    background: rgba(0, 0, 0, 0.8);
+    color: white;
+    padding: 6px 12px;
+    border-radius: 4px;
+    font-size: 12px;
+    z-index: 100;
+    backdrop-filter: blur(5px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .sidebar { 
     flex: 1; 
-    min-width: 300px; 
+    min-width: 320px; 
     max-width: 400px; 
     background: #252526; 
     border-left: 1px solid #333; 
@@ -54,6 +149,33 @@ iframe {
     padding: 15px; 
     gap: 15px; 
     overflow-y: auto; 
+    overflow-x: hidden;
+    flex-shrink: 0;
+}
+
+/* 手机端侧边栏样式 */
+@media (max-width: 768px) {
+    .sidebar {
+        width: 100%;
+        max-width: 100%;
+        min-width: unset;
+        border-left: none;
+        border-top: 1px solid #333;
+        max-height: 40vh;
+        min-height: 300px;
+    }
+    
+    .game-area {
+        flex: 2;
+        min-height: 60vh;
+    }
+}
+
+/* 平板端适配 */
+@media (max-width: 1024px) and (min-width: 769px) {
+    .sidebar {
+        min-width: 280px;
+    }
 }
 
 .panel { 
@@ -61,20 +183,14 @@ iframe {
     padding: 15px; 
     border-radius: 8px; 
     border: 1px solid #444;
-}
-
-.panel h3 { 
-    margin-top: 0; 
-    margin-bottom: 10px; 
-    font-size: 14px; 
-    color: #aaa; 
-    text-transform: uppercase; 
-    letter-spacing: 1px;
+    flex-shrink: 0;
 }
 
 textarea#game-text { 
     width: 100%; 
     height: 150px; 
+    min-height: 120px;
+    max-height: 200px;
     background: #1e1e1e; 
     color: #fff; 
     border: 1px solid #444; 
@@ -89,10 +205,12 @@ textarea#game-text {
 
 #screenshot-img { 
     max-width: 100%; 
+    max-height: 200px;
     border: 1px solid #555; 
     display: none; 
     margin-top: 5px; 
     border-radius: 4px;
+    object-fit: contain;
 }
 
 button { 
@@ -107,7 +225,10 @@ button {
     transition: background 0.2s;
     display: inline-flex;
     align-items: center;
+    justify-content: center;
     gap: 5px;
+    flex-shrink: 0;
+    min-height: 40px;
 }
 
 button:hover { 
@@ -135,6 +256,7 @@ button.secondary:hover {
     border: 1px solid #333;
     max-height: 200px;
     overflow-y: auto;
+    flex-shrink: 0;
 }
 
 /* 截图闪光特效 */
@@ -156,20 +278,41 @@ button.secondary:hover {
     align-items: center;
     gap: 8px;
     margin-bottom: 10px;
+    flex-wrap: wrap;
 }
 
 .checkbox-container input[type="checkbox"] {
     width: 16px;
     height: 16px;
+    cursor: pointer;
 }
 
 .status-bar {
     display: flex;
     align-items: center;
-    gap: 15px;
+    gap: 12px;
     font-size: 12px;
     color: #888;
-    margin-top: 5px;
+    flex-wrap: wrap;
+}
+
+/* 手机端状态栏优化 */
+@media (max-width: 480px) {
+    .status-bar {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 6px;
+    }
+    
+    header {
+        padding: 10px;
+        gap: 10px;
+    }
+    
+    .header-left {
+        width: 100%;
+        justify-content: space-between;
+    }
 }
 
 .status-indicator {
@@ -198,11 +341,94 @@ button.secondary:hover {
     flex-wrap: wrap;
 }
 
+/* 手机端按钮优化 */
+@media (max-width: 480px) {
+    .controls-row {
+        flex-direction: column;
+    }
+    
+    button {
+        width: 100%;
+    }
+    
+    .panel {
+        padding: 12px;
+    }
+}
+
 #debug-info {
     font-size: 11px;
     color: #666;
-    padding: 5px;
+    padding: 8px;
     background: #1a1a1a;
-    border-radius: 3px;
+    border-radius: 4px;
     margin-top: 5px;
+    line-height: 1.5;
+    word-break: break-word;
+}
+
+/* 文件上传样式优化 */
+#zip {
+    padding: 8px;
+    background: #1e1e1e;
+    border: 1px solid #444;
+    border-radius: 4px;
+    color: #eee;
+    font-size: 14px;
+    cursor: pointer;
+    min-width: 200px;
+}
+
+#zip:hover {
+    border-color: #555;
+}
+
+/* 滚动条样式 */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: #1e1e1e;
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #444;
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: #555;
+}
+
+/* 游戏区域触摸优化 */
+.game-area {
+    touch-action: manipulation;
+}
+
+/* 防止文本选中 */
+.no-select {
+    user-select: none;
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+}
+
+/* 响应式文本大小 */
+@media (max-width: 480px) {
+    .panel h3 {
+        font-size: 13px;
+    }
+    
+    textarea#game-text {
+        font-size: 13px;
+        padding: 8px;
+    }
+    
+    #log {
+        font-size: 11px;
+        padding: 8px;
+    }
 }
