@@ -290,6 +290,25 @@ let currentScreenshot = null;
 let swIndicator, gameIndicator, swStatusText, gameStatusText, envInfo;
 
 // ============================
+// 第2步：新增"唯一正确"的基础路径
+// ============================
+const BASE_PATH = location.pathname.replace(/\/[^\/]*$/, '/');
+
+// ============================
+// 第4步：修正 getGamePath()
+// ============================
+function getGamePath() {
+  return BASE_PATH + 'game/index.html';
+}
+
+// ============================
+// 第3步：修正 getSWPath()
+// ============================
+function getSWPath() {
+  return BASE_PATH + 'sw.js';
+}
+
+// ============================
 // 日志系统
 // ============================
 const log = (t) => {
@@ -340,9 +359,8 @@ function initDOMElements() {
   
   // 更新环境信息显示
   if (envInfo && envInfo.textContent !== undefined) {
-    const isGitHubPages = window.location.hostname.includes('github.io');
     const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-    envInfo.textContent = isGitHubPages ? '🌐 GitHub Pages' : isLocalhost ? '💻 本地环境' : '🌍 在线环境';
+    envInfo.textContent = isLocalhost ? '💻 本地环境' : '🌍 在线环境';
   }
 }
 
@@ -407,57 +425,6 @@ function updateGameStatus(status) {
 }
 
 // ============================
-// 环境检测和路径处理
-// ============================
-function getBasePath() {
-  // GitHub Pages 特殊处理
-  if (window.location.hostname.includes('github.io')) {
-    const pathSegments = window.location.pathname.split('/');
-    // 过滤掉空字符串和文件扩展名
-    const filteredSegments = pathSegments.filter(segment => 
-      segment && !segment.includes('.') && segment !== 'index.html'
-    );
-    
-    if (filteredSegments.length > 0) {
-      // 返回带斜杠的路径
-      return '/' + filteredSegments.join('/') + '/';
-    } else {
-      return '/';
-    }
-  }
-  
-  // 本地开发环境
-  if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-    return '/';
-  }
-  
-  // 默认情况
-  return '/';
-}
-
-const BASE_PATH = getBasePath();
-
-// 获取正确的 Service Worker 路径
-function getSWPath() {
-  if (BASE_PATH === '/') {
-    return 'sw.js';
-  } else {
-    // 确保路径正确
-    return BASE_PATH.replace(/\/+$/, '') + '/sw.js';
-  }
-}
-
-// 获取正确的游戏路径
-function getGamePath() {
-  if (BASE_PATH === '/') {
-    return '/game/index.html';
-  } else {
-    // 确保路径正确
-    return BASE_PATH.replace(/\/+$/, '') + '/game/index.html';
-  }
-}
-
-// ============================
 // Service Worker 注册与通信
 // ============================
 
@@ -500,7 +467,7 @@ function setupSWMessageHandler() {
   }
 }
 
-// 注册 Service Worker（修复版本）
+// 第6步：修正 Service Worker 注册代码
 async function registerSW() {
   if (!('serviceWorker' in navigator)) {
     log("❌ 浏览器不支持 Service Worker");
@@ -513,20 +480,12 @@ async function registerSW() {
     
     // 计算 Service Worker 路径和作用域
     const swPath = getSWPath();
-    
-    // 对于 GitHub Pages，作用域必须是当前目录或子目录
-    let scope;
-    if (window.location.hostname.includes('github.io')) {
-      // GitHub Pages 的特殊处理：作用域必须是当前目录
-      scope = './';
-    } else {
-      scope = BASE_PATH;
-    }
-    
+    const scope = BASE_PATH;
+
     log(`📡 注册 Service Worker: ${swPath}, 作用域: ${scope}`);
     
-    const registration = await navigator.serviceWorker.register(swPath, { 
-      scope: scope
+    const registration = await navigator.serviceWorker.register(swPath, {
+      scope
     });
     
     // 等待 Service Worker 就绪
@@ -647,8 +606,7 @@ function setupZipHandler() {
           文件数: ${fileCount}<br>
           总大小: ${(totalSize / 1024 / 1024).toFixed(2)} MB<br>
           路径: ${BASE_PATH}<br>
-          环境: ${window.location.hostname.includes('github.io') ? 'GitHub Pages' : 
-                 (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') ? '本地' : '在线'}
+          环境: ${window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' ? '本地' : '在线'}
         `;
       } else {
         log("❌ Service Worker 未激活，请刷新页面重试");
@@ -861,10 +819,9 @@ function init() {
     
     log("🚀 RPGMZ Player Pro 已启动");
     
-    const isGitHubPages = window.location.hostname.includes('github.io');
     const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
     
-    log(`🌐 环境: ${isGitHubPages ? 'GitHub Pages' : isLocalhost ? '本地' : '在线'}`);
+    log(`🌐 环境: ${isLocalhost ? '本地' : '在线'}`);
     log(`📁 基础路径: ${BASE_PATH}`);
     
     // 设置事件处理器
