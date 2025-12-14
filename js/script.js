@@ -1,0 +1,581 @@
+// ============================
+// 全局变量
+// ============================
+let lastText = "";
+let textInterval;
+let currentScreenshot = null;
+
+// DOM 元素引用
+let swIndicator, gameIndicator, swStatusText, gameStatusText, envInfo;
+
+// ============================
+// 第2步：新增"唯一正确"的基础路径
+// ============================
+const BASE_PATH = location.pathname.replace(/\/[^\/]*$/, '/');
+
+// ============================
+// 第4步：修正 getGamePath()
+// ============================
+function getGamePath() {
+  return BASE_PATH + 'game/index.html';
+}
+
+// ============================
+// 第3步：修正 getSWPath()
+// ============================
+function getSWPath() {
+  return BASE_PATH + 'sw.js';
+}
+
+// ============================
+// 日志系统
+// ============================
+const log = (t) => {
+  try {
+    const el = document.getElementById("log");
+    if (el) {
+      const timestamp = new Date().toLocaleTimeString();
+      el.textContent = `[${timestamp}] ${t}\n${el.textContent}`;
+      // 限制日志行数
+      const lines = el.textContent.split('\n');
+      if (lines.length > 50) {
+        el.textContent = lines.slice(0, 50).join('\n');
+      }
+    }
+  } catch (error) {
+    console.warn('日志记录失败:', error);
+  }
+};
+
+// ============================
+// DOM 工具函数
+// ============================
+
+// 安全的 DOM 元素获取函数
+function getElementSafe(id) {
+  const el = document.getElementById(id);
+  if (!el) {
+    console.warn(`元素 ${id} 未找到`);
+    return {
+      className: '',
+      style: { background: '', animation: '' },
+      textContent: '',
+      innerHTML: '',
+      disabled: false,
+      value: ''
+    };
+  }
+  return el;
+}
+
+// 初始化 DOM 引用
+function initDOMElements() {
+  swIndicator = getElementSafe('sw-indicator');
+  gameIndicator = getElementSafe('game-indicator');
+  swStatusText = getElementSafe('sw-status');
+  gameStatusText = getElementSafe('game-status');
+  envInfo = getElementSafe('env-info');
+  
+  // 更新环境信息显示
+  if (envInfo && envInfo.textContent !== undefined) {
+    const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    envInfo.textContent = isLocalhost ? '💻 本地环境' : '🌍 在线环境';
+  }
+}
+
+// ============================
+// 状态管理
+// ============================
+
+// 更新 Service Worker 状态指示器
+function updateSWStatus(status) {
+  try {
+    switch(status) {
+      case 'registered':
+        swIndicator.className = 'status-indicator active';
+        swStatusText.textContent = 'Service Worker: 已激活';
+        break;
+      case 'error':
+        swIndicator.style.background = '#f44336';
+        swIndicator.style.animation = '';
+        swStatusText.textContent = 'Service Worker: 错误';
+        break;
+      case 'installing':
+        swIndicator.style.background = '#ff9800';
+        swIndicator.style.animation = 'pulse 1s infinite';
+        swStatusText.textContent = 'Service Worker: 安装中';
+        break;
+      default:
+        swIndicator.style.background = '#888';
+        swIndicator.style.animation = '';
+        swStatusText.textContent = 'Service Worker: 未注册';
+    }
+  } catch (error) {
+    console.warn('更新 SW 状态时出错:', error);
+  }
+}
+
+// 更新游戏状态
+function updateGameStatus(status) {
+  try {
+    switch(status) {
+      case 'loaded':
+        gameIndicator.className = 'status-indicator active';
+        gameStatusText.textContent = '游戏: 已加载';
+        break;
+      case 'loading':
+        gameIndicator.style.background = '#ff9800';
+        gameIndicator.style.animation = 'pulse 1s infinite';
+        gameStatusText.textContent = '游戏: 加载中';
+        break;
+      case 'error':
+        gameIndicator.style.background = '#f44336';
+        gameIndicator.style.animation = '';
+        gameStatusText.textContent = '游戏: 错误';
+        break;
+      default:
+        gameIndicator.style.background = '#888';
+        gameIndicator.style.animation = '';
+        gameStatusText.textContent = '游戏: 未加载';
+    }
+  } catch (error) {
+    console.warn('更新游戏状态时出错:', error);
+  }
+}
+
+// ============================
+// Service Worker 注册与通信
+// ============================
+
+// Service Worker 消息处理
+function setupSWMessageHandler() {
+  try {
+    navigator.serviceWorker.addEventListener("message", (event) => {
+      if (event.data && event.data.type === "GAME_READY") {
+        log("✅ 资源就绪，启动游戏...");
+        updateGameStatus('loading');
+        
+        const gameUrl = getGamePath();
+        log(`🚀 加载游戏: ${gameUrl}`);
+        
+        const iframe = document.getElementById("game");
+        if (iframe) {
+          iframe.src = gameUrl;
+          
+          // 监听 iframe 加载完成
+          iframe.onload = function() {
+            log("🎮 游戏加载完成");
+            updateGameStatus('loaded');
+            startTextWatcher();
+          };
+          
+          iframe.onerror = function() {
+            log("❌ 游戏加载失败");
+            updateGameStatus('error');
+          };
+        }
+      }
+      
+      if (event.data && event.data.type === "PONG") {
+        log(`🔄 SW 版本: ${event.data.version}, 作用域: ${event.data.scope || '/'}`);
+        updateSWStatus('registered');
+      }
+    });
+  } catch (error) {
+    console.error('设置 SW 消息处理器失败:', error);
+  }
+}
+
+// 第6步：修正 Service Worker 注册代码
+async function registerSW() {
+  if (!('serviceWorker' in navigator)) {
+    log("❌ 浏览器不支持 Service Worker");
+    updateSWStatus('error');
+    return false;
+  }
+  
+  try {
+    updateSWStatus('installing');
+    
+    // 计算 Service Worker 路径和作用域
+    const swPath = getSWPath();
+    const scope = BASE_PATH;
+
+    log(`📡 注册 Service Worker: ${swPath}, 作用域: ${scope}`);
+    
+    const registration = await navigator.serviceWorker.register(swPath, {
+      scope
+    });
+    
+    // 等待 Service Worker 就绪
+    if (registration.installing) {
+      registration.installing.addEventListener('statechange', (e) => {
+        const sw = e.target;
+        log(`🔄 SW 状态: ${sw.state}`);
+        
+        if (sw.state === 'activated') {
+          updateSWStatus('registered');
+          
+          // 发送 ping 检查连接
+          if (registration.active) {
+            registration.active.postMessage({ type: "PING" });
+          }
+        }
+      });
+    } else if (registration.active) {
+      updateSWStatus('registered');
+      registration.active.postMessage({ type: "PING" });
+    }
+    
+    // 监听更新
+    registration.addEventListener('updatefound', () => {
+      const newWorker = registration.installing;
+      log('🔄 发现 Service Worker 更新');
+      
+      newWorker.addEventListener('statechange', () => {
+        log(`🔄 新 SW 状态: ${newWorker.state}`);
+        if (newWorker.state === 'installed') {
+          log('🔄 新版本已安装，刷新页面即可使用');
+        }
+      });
+    });
+    
+    return true;
+  } catch (error) {
+    console.error('Service Worker 注册失败:', error);
+    log(`❌ SW 注册失败: ${error.message}`);
+    updateSWStatus('error');
+    return false;
+  }
+}
+
+// ============================
+// ZIP 文件处理
+// ============================
+function setupZipHandler() {
+  const zipInput = document.getElementById("zip");
+  if (!zipInput) return;
+  
+  zipInput.onchange = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    
+    log(`📦 读取 ZIP 文件: ${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB)`);
+    
+    // 注册 Service Worker
+    const swRegistered = await registerSW();
+    if (!swRegistered) {
+      log("❌ 无法继续，Service Worker 注册失败");
+      return;
+    }
+    
+    try {
+      const zip = await JSZip.loadAsync(file);
+      const files = {};
+      let totalSize = 0;
+      let fileCount = 0;
+      
+      // 处理所有文件
+      for (const [relativePath, entry] of Object.entries(zip.files)) {
+        if (!entry.dir) {
+          const cleanPath = relativePath.replace(/^\/+/, "").replace(/\\/g, "/");
+          
+          // 跳过 macOS 的 __MACOSX 文件夹
+          if (cleanPath.includes('__MACOSX/')) continue;
+          
+          const fileData = await entry.async("uint8array");
+          files[cleanPath] = fileData;
+          totalSize += fileData.length;
+          fileCount++;
+          
+          if (fileCount <= 10) {
+            log(`📄 ${cleanPath} (${(fileData.length / 1024).toFixed(1)} KB)`);
+          }
+        }
+      }
+      
+      if (fileCount > 10) {
+        log(`📄 ... 以及另外 ${fileCount - 10} 个文件`);
+      }
+      
+      log(`📤 准备发送 ${fileCount} 个文件 (${(totalSize / 1024 / 1024).toFixed(2)} MB)`);
+      
+      // 检查是否有必要的文件
+      if (!files["index.html"] && !files["www/index.html"]) {
+        log("⚠️ 警告: ZIP 文件中未找到 index.html");
+      }
+      
+      // 发送文件给 Service Worker
+      if (navigator.serviceWorker.controller) {
+        navigator.serviceWorker.controller.postMessage({ 
+          type: "LOAD_GAME", 
+          files: files,
+          metadata: {
+            fileName: file.name,
+            fileCount: fileCount,
+            totalSize: totalSize,
+            timestamp: new Date().toISOString()
+          }
+        });
+        
+        // 更新调试信息
+        const debugInfo = getElementSafe('debug-info');
+        debugInfo.innerHTML = `
+          ZIP: ${file.name}<br>
+          文件数: ${fileCount}<br>
+          总大小: ${(totalSize / 1024 / 1024).toFixed(2)} MB<br>
+          路径: ${BASE_PATH}<br>
+          环境: ${window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' ? '本地' : '在线'}
+        `;
+      } else {
+        log("❌ Service Worker 未激活，请刷新页面重试");
+      }
+    } catch (error) {
+      console.error("ZIP 处理错误:", error);
+      log(`❌ ZIP 处理失败: ${error.message}`);
+    }
+  };
+}
+
+// ============================
+// 文本提取功能
+// ============================
+function extractText() {
+  try {
+    const iframe = document.getElementById("game");
+    if (!iframe) return;
+    
+    const gameWin = iframe.contentWindow;
+    
+    if (!gameWin) {
+      log("⚠️ 无法访问游戏窗口");
+      return;
+    }
+    
+    // 尝试多种 RPG Maker 版本的消息系统
+    let text = "";
+    
+    // RPG Maker MZ
+    if (gameWin.$gameMessage && gameWin.$gameMessage.hasText) {
+      if (gameWin.$gameMessage.hasText()) {
+        text = gameWin.$gameMessage._texts?.join("\n") || "";
+      }
+    } 
+    // RPG Maker MV
+    else if (gameWin.$gameMessage && gameWin.$gameMessage._texts) {
+      text = gameWin.$gameMessage._texts.join("\n");
+    }
+    // 通用方法：查找对话框元素
+    else {
+      const messageWindows = gameWin.document.querySelectorAll('.window, .message_window');
+      messageWindows.forEach(window => {
+        const content = window.textContent || window.innerText;
+        if (content.trim()) {
+          text += content + "\n";
+        }
+      });
+    }
+    
+    // 清理文本（移除控制字符）
+    if (text) {
+      text = text.replace(/\\(?:[A-Z]+\[[^\]]*\]|[A-Z]+|[.\|\^<>!])/gi, "")
+                 .replace(/\\[Nn]/g, "\n")
+                 .replace(/\\[Cc]\[(\d+)\]/g, "") // 移除颜色代码
+                 .replace(/\{.*?\}/g, "") // 移除大括号内容
+                 .trim();
+    }
+    
+    if (text && text !== lastText) {
+      const textarea = getElementSafe('game-text');
+      textarea.value = text;
+      lastText = text;
+      
+      // 视觉反馈
+      textarea.style.background = "#2a2a2a";
+      setTimeout(() => textarea.style.background = "#1e1e1e", 100);
+      
+      log(`📝 提取文本: ${text.length} 字符`);
+    }
+  } catch (e) {
+    console.error("文本提取错误:", e);
+  }
+}
+
+function clearText() {
+  const textarea = getElementSafe('game-text');
+  textarea.value = "";
+  lastText = "";
+  log("🗑️ 已清空文本框");
+}
+
+function startTextWatcher() {
+  if (textInterval) clearInterval(textInterval);
+  
+  textInterval = setInterval(() => {
+    const autoSync = document.getElementById("auto-sync");
+    if (autoSync && autoSync.checked) {
+      extractText();
+    }
+  }, 300);
+}
+
+// ============================
+// 截图功能
+// ============================
+function takeScreenshot() {
+  try {
+    const iframe = document.getElementById("game");
+    if (!iframe) {
+      log("❌ 未找到游戏 iframe");
+      return;
+    }
+    
+    const gameWin = iframe.contentWindow;
+    
+    if (!gameWin) {
+      log("❌ 无法访问游戏窗口");
+      return;
+    }
+    
+    const canvas = gameWin.document.querySelector("canvas");
+    
+    if (!canvas) {
+      log("❌ 未找到游戏 Canvas");
+      return;
+    }
+    
+    // 检查 Canvas 尺寸
+    if (canvas.width === 0 || canvas.height === 0) {
+      log("⚠️ Canvas 尺寸为 0，等待游戏初始化...");
+      return;
+    }
+    
+    log(`📷 截图尺寸: ${canvas.width}x${canvas.height}`);
+    
+    // 视觉反馈：闪光效果
+    const flash = document.getElementById("flash");
+    if (flash) {
+      flash.style.opacity = "0.7";
+      setTimeout(() => flash.style.opacity = "0", 150);
+    }
+    
+    // 创建高质量截图
+    const offscreenCanvas = document.createElement('canvas');
+    offscreenCanvas.width = canvas.width;
+    offscreenCanvas.height = canvas.height;
+    const ctx = offscreenCanvas.getContext('2d');
+    
+    if (!ctx) {
+      log("❌ 无法创建绘图上下文");
+      return;
+    }
+    
+    // 设置高质量渲染
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    
+    // 绘制截图
+    ctx.drawImage(canvas, 0, 0);
+    
+    // 生成数据 URL
+    currentScreenshot = offscreenCanvas.toDataURL("image/png", 1.0);
+    
+    // 显示截图
+    const img = document.getElementById("screenshot-img");
+    if (img) {
+      img.src = currentScreenshot;
+      img.style.display = "block";
+      img.style.maxHeight = "200px";
+    }
+    
+    // 显示提示
+    const tip = document.getElementById("screenshot-tip");
+    if (tip) {
+      tip.style.display = "block";
+    }
+    
+    // 启用下载按钮
+    const downloadBtn = getElementSafe('download-btn');
+    downloadBtn.disabled = false;
+    downloadBtn.style.background = "#4CAF50";
+    
+    log("✅ 截图成功");
+  } catch (e) {
+    console.error("截图失败:", e);
+    log(`❌ 截图失败: ${e.message}`);
+  }
+}
+
+function downloadScreenshot() {
+  if (!currentScreenshot) {
+    log("❌ 没有可下载的截图");
+    return;
+  }
+  
+  try {
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const filename = `screenshot-${timestamp}.png`;
+    
+    const link = document.createElement('a');
+    link.download = filename;
+    link.href = currentScreenshot;
+    link.click();
+    
+    log(`⬇️ 下载截图: ${filename}`);
+  } catch (e) {
+    console.error("下载失败:", e);
+    log(`❌ 下载失败: ${e.message}`);
+  }
+}
+
+// ============================
+// 初始化
+// ============================
+function init() {
+  try {
+    // 初始化 DOM 元素引用
+    initDOMElements();
+    
+    log("🚀 RPGMZ Player Pro 已启动");
+    
+    const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    
+    log(`🌐 环境: ${isLocalhost ? '本地' : '在线'}`);
+    log(`📁 基础路径: ${BASE_PATH}`);
+    
+    // 设置事件处理器
+    setupSWMessageHandler();
+    setupZipHandler();
+    
+    // 自动注册 Service Worker（如果可能）
+    if (window.location.protocol === 'https:' || isLocalhost) {
+      setTimeout(() => {
+        registerSW().then(registered => {
+          if (!registered) {
+            log("ℹ️ Service Worker 需要 HTTPS 或 localhost 环境");
+          }
+        });
+      }, 1000);
+    }
+    
+    // 初始状态
+    updateSWStatus('default');
+    updateGameStatus('default');
+  } catch (error) {
+    console.error('初始化失败:', error);
+    log(`❌ 初始化失败: ${error.message}`);
+  }
+}
+
+// 在 DOM 完全加载后初始化
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', init);
+} else {
+  init();
+}
+
+// 导出功能给全局使用
+window.extractText = extractText;
+window.clearText = clearText;
+window.takeScreenshot = takeScreenshot;
+window.downloadScreenshot = downloadScreenshot;
