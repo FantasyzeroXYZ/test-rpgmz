@@ -1,0 +1,15 @@
+# This file tells GitHub Pages not to process the site with Jekyll
+
+# Why this file exists:
+# 1. GitHub Pages uses Jekyll by default to build static sites
+# 2. Jekyll ignores files and directories that start with underscores (_)
+# 3. Many web projects have folders like _next, _build, _dist, etc.
+# 4. This file disables Jekyll processing, allowing all files to be served
+
+# Benefits for RPGMZ Player:
+# - Ensures Service Worker (sw.js) works correctly
+# - Allows any file structure from ZIP uploads to work
+# - Prevents issues with underscore-prefixed game assets
+# - Better compatibility with JavaScript applications
+
+# This is an empty file - its presence alone disables Jekyll

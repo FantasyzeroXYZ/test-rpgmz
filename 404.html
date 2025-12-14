@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RPGMZ Player - Page Not Found</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🎮</text></svg>">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #1e1e1e 0%, #252526 100%);
+            color: #fff;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            text-align: center;
+        }
+        
+        .container {
+            max-width: 600px;
+            width: 100%;
+            padding: 40px;
+            background: rgba(37, 37, 38, 0.9);
+            border-radius: 16px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+            border: 1px solid #333;
+        }
+        
+        h1 {
+            font-size: 120px;
+            margin-bottom: 20px;
+            color: #0e639c;
+            font-weight: 800;
+            line-height: 1;
+        }
+        
+        h2 {
+            font-size: 28px;
+            margin-bottom: 20px;
+            color: #fff;
+            font-weight: 600;
+        }
+        
+        p {
+            font-size: 16px;
+            line-height: 1.6;
+            color: #aaa;
+            margin-bottom: 30px;
+        }
+        
+        .game-icon {
+            font-size: 60px;
+            margin-bottom: 20px;
+            display: block;
+        }
+        
+        .button-group {
+            display: flex;
+            gap: 15px;
+            justify-content: center;
+            flex-wrap: wrap;
+            margin-top: 30px;
+        }
+        
+        .btn {
+            display: inline-block;
+            padding: 12px 28px;
+            background: #0e639c;
+            color: white;
+            text-decoration: none;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 16px;
+            transition: all 0.3s ease;
+            border: none;
+            cursor: pointer;
+        }
+        
+        .btn:hover {
+            background: #1177bb;
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(14, 99, 156, 0.4);
+        }
+        
+        .btn-secondary {
+            background: #444;
+        }
+        
+        .btn-secondary:hover {
+            background: #555;
+        }
+        
+        .spinner {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: #0e639c;
+            animation: spin 1s ease-in-out infinite;
+            margin-right: 10px;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
+        .redirect-text {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-top: 30px;
+            color: #888;
+            font-size: 14px;
+        }
+        
+        @media (max-width: 768px) {
+            .container {
+                padding: 30px 20px;
+            }
+            
+            h1 {
+                font-size: 80px;
+            }
+            
+            h2 {
+                font-size: 24px;
+            }
+            
+            .button-group {
+                flex-direction: column;
+                align-items: center;
+            }
+            
+            .btn {
+                width: 100%;
+                max-width: 300px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <span class="game-icon">🎮</span>
+        <h1>404</h1>
+        <h2>Page Not Found</h2>
+        <p>The page you're looking for doesn't exist or has been moved. This is a single-page application, so you'll be redirected to the main page.</p>
+        
+        <div class="button-group">
+            <a href="/" class="btn">Go to Homepage</a>
+            <a href="javascript:history.back()" class="btn btn-secondary">Go Back</a>
+        </div>
+        
+        <div class="redirect-text">
+            <div class="spinner"></div>
+            <span>Redirecting to homepage...</span>
+        </div>
+    </div>
+    
+    <script>
+        // 重定向逻辑
+        (function() {
+            // 保存当前路径以便重定向后恢复
+            const redirect = sessionStorage.redirect;
+            const timestamp = sessionStorage.redirectTime;
+            const now = Date.now();
+            
+            // 如果重定向在 5 分钟内发生，使用保存的路径
+            if (redirect && timestamp && (now - parseInt(timestamp)) < 5 * 60 * 1000) {
+                delete sessionStorage.redirect;
+                delete sessionStorage.redirectTime;
+                
+                // 清理路径
+                const cleanRedirect = redirect.replace(/\/\/+/g, '/');
+                if (cleanRedirect !== location.pathname) {
+                    console.log('Redirecting to:', cleanRedirect);
+                    history.replaceState(null, null, cleanRedirect);
+                    location.reload();
+                    return;
+                }
+            }
+            
+            // 否则重定向到主页
+            console.log('Redirecting to homepage...');
+            
+            // 显示倒计时
+            let countdown = 3;
+            const redirectText = document.querySelector('.redirect-text span');
+            const interval = setInterval(() => {
+                if (countdown <= 0) {
+                    clearInterval(interval);
+                    if (location.pathname === '/') {
+                        location.reload();
+                    } else {
+                        location.replace('/');
+                    }
+                } else {
+                    redirectText.textContent = `Redirecting to homepage in ${countdown} seconds...`;
+                    countdown--;
+                }
+            }, 1000);
+            
+            // 3 秒后自动重定向
+            setTimeout(() => {
+                if (location.pathname === '/') {
+                    location.reload();
+                } else {
+                    location.replace('/');
+                }
+            }, 3000);
+        })();
+        
+        // 保存当前路径到 sessionStorage（供重定向后使用）
+        if (location.pathname !== '/') {
+            sessionStorage.redirect = location.pathname;
+            sessionStorage.redirectTime = Date.now();
+        }
+    </script>
+</body>
+</html>
