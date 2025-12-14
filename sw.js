@@ -14,7 +14,6 @@ self.addEventListener("message", e => {
     const count = Object.keys(GAME_FILES).length;
     console.log(`[SW] 游戏文件已加载: ${count} 个文件`);
     
-    // 通知主线程准备就绪
     if (e.source) {
       e.source.postMessage({ type: "GAME_READY" });
     }
@@ -25,26 +24,25 @@ self.addEventListener("fetch", e => {
   const url = new URL(e.request.url);
 
   // ==========================================
-  // ⭐ 【修改 1】动态剥离 Base Path 和 /game/ 前缀
+  // ⭐ GitHub Pages 路径修正：动态剥离 Base Path
   // ==========================================
   
-  // Service Worker 的 Scope (例如：https://user.github.io/repo-name/)
-  // 它的 pathname 是 /repo-name/
+  // 1. 获取 Service Worker 的 Scope Pathname (例如：/repo-name/)
   const scopePathname = self.registration.scope.replace(url.origin, '');
 
-  // 完整的请求路径名 (例如：/repo-name/game/index.html)
+  // 2. 获取请求的完整 Pathname (例如：/repo-name/game/index.html)
   const fullPathname = url.pathname;
   
-  // 剥离 Scope 部分，得到 /game/index.html
+  // 3. 剥离 Scope 部分，得到相对路径 (例如：/game/index.html)
   let requestedPathWithGame = fullPathname.replace(scopePathname, '/');
   
-  // 只处理 /game/ 下的请求
+  // 只处理 /game/ 下的请求 (确保只处理游戏资源)
   if (!requestedPathWithGame.startsWith("/game/")) return;
 
-  // 1. 剥离 /game/
+  // 4. 剥离 /game/ 前缀，得到文件在 ZIP 中的路径 (例如：index.html)
   let requestedPath = requestedPathWithGame.replace(/^\/game\//, "");
   
-  // 2. 解码 URL (处理空格)
+  // 5. 解码 URL (处理空格)
   try { requestedPath = decodeURIComponent(requestedPath); } catch (e) {}
 
   // ==========================================
@@ -57,7 +55,7 @@ self.addEventListener("fetch", e => {
       const decoder = new TextDecoder("utf-8");
       let htmlStr = decoder.decode(htmlContent);
 
-      // 💉 注入黑科技脚本：强制开启 WebGL 缓冲区保留，解决截图黑屏问题
+      // 💉 注入 WebGL 补丁
       const scriptToInject = `
         <script>
           console.log("💉 [SW Inject] 正在应用截图修复补丁...");
@@ -65,7 +63,7 @@ self.addEventListener("fetch", e => {
           HTMLCanvasElement.prototype.getContext = function(type, attributes) {
             if (type === 'webgl' || type === 'webgl2') {
               attributes = attributes || {};
-              attributes.preserveDrawingBuffer = true; // ✨ 关键：允许截图
+              attributes.preserveDrawingBuffer = true;
               console.log("✨ WebGL Context Created with preserveDrawingBuffer: true");
             }
             return originalGetContext.call(this, type, attributes);
@@ -83,7 +81,7 @@ self.addEventListener("fetch", e => {
   }
 
   // ==========================================
-  // ⭐ 文件查找逻辑 (增加忽略大小写和后缀容错)
+  // ⭐ 文件查找逻辑 (包含所有容错)
   // ==========================================
   
   let body, foundPath = requestedPath, successType = '未找到';
@@ -94,7 +92,7 @@ self.addEventListener("fetch", e => {
       successType = '精确匹配';
   }
 
-  // --- B. 下划线容错 (处理加密素材) ---
+  // --- B. 下划线容错 ---
   if (!body && requestedPath.endsWith("_")) {
     foundPath = requestedPath.slice(0, -1);
     body = GAME_FILES[foundPath];
@@ -114,20 +112,17 @@ self.addEventListener("fetch", e => {
     }
   }
   
-  // --- D. 【修改 2】 最终容错：自定义后缀处理 (例如 Frigid_Eyes_fin.ogg) ---
+  // --- D. 自定义后缀处理 ---
   if (!body) {
       const parts = requestedPath.split('.');
       if (parts.length > 1) {
-          const ext = parts.pop(); // .ogg
-          const nameWithSuffix = parts.join('.'); // audio/bgm/Frigid_Eyes_fin
-          
+          const ext = parts.pop();
+          const nameWithSuffix = parts.join('.');
           const lastUnderscoreIndex = nameWithSuffix.lastIndexOf('_');
           
           if (lastUnderscoreIndex !== -1) {
-              const baseName = nameWithSuffix.substring(0, lastUnderscoreIndex);
-              const cleanPath = `${baseName}.${ext}`; // audio/bgm/Frigid_Eyes.ogg
+              const cleanPath = `${nameWithSuffix.substring(0, lastUnderscoreIndex)}.${ext}`;
 
-              // 再次进行大小写模糊查找
               const lowerCleanPath = cleanPath.toLowerCase();
               const matchedKey = Object.keys(GAME_FILES).find(key => key.toLowerCase() === lowerCleanPath);
               
