@@ -318,7 +318,6 @@ function getElementSafe(id) {
   const el = document.getElementById(id);
   if (!el) {
     console.warn(`元素 ${id} 未找到`);
-    // 创建一个虚拟元素以避免错误
     return {
       className: '',
       style: { background: '', animation: '' },
@@ -411,18 +410,52 @@ function updateGameStatus(status) {
 // 环境检测和路径处理
 // ============================
 function getBasePath() {
-  const isGitHubPages = window.location.hostname.includes('github.io');
-  if (isGitHubPages) {
+  // GitHub Pages 特殊处理
+  if (window.location.hostname.includes('github.io')) {
     const pathSegments = window.location.pathname.split('/');
-    const filteredSegments = pathSegments.filter(segment => segment && !segment.includes('.'));
+    // 过滤掉空字符串和文件扩展名
+    const filteredSegments = pathSegments.filter(segment => 
+      segment && !segment.includes('.') && segment !== 'index.html'
+    );
+    
     if (filteredSegments.length > 0) {
-      return '/' + filteredSegments.join('/');
+      // 返回带斜杠的路径
+      return '/' + filteredSegments.join('/') + '/';
+    } else {
+      return '/';
     }
   }
+  
+  // 本地开发环境
+  if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+    return '/';
+  }
+  
+  // 默认情况
   return '/';
 }
 
 const BASE_PATH = getBasePath();
+
+// 获取正确的 Service Worker 路径
+function getSWPath() {
+  if (BASE_PATH === '/') {
+    return 'sw.js';
+  } else {
+    // 确保路径正确
+    return BASE_PATH.replace(/\/+$/, '') + '/sw.js';
+  }
+}
+
+// 获取正确的游戏路径
+function getGamePath() {
+  if (BASE_PATH === '/') {
+    return '/game/index.html';
+  } else {
+    // 确保路径正确
+    return BASE_PATH.replace(/\/+$/, '') + '/game/index.html';
+  }
+}
 
 // ============================
 // Service Worker 注册与通信
@@ -436,15 +469,9 @@ function setupSWMessageHandler() {
         log("✅ 资源就绪，启动游戏...");
         updateGameStatus('loading');
         
-        // 动态构建游戏 URL
-        let gameUrl;
-        if (BASE_PATH === '/') {
-          gameUrl = '/game/index.html';
-        } else {
-          gameUrl = `${BASE_PATH}/game/index.html`.replace(/\/\//g, '/');
-        }
-        
+        const gameUrl = getGamePath();
         log(`🚀 加载游戏: ${gameUrl}`);
+        
         const iframe = document.getElementById("game");
         if (iframe) {
           iframe.src = gameUrl;
@@ -473,7 +500,7 @@ function setupSWMessageHandler() {
   }
 }
 
-// 注册 Service Worker
+// 注册 Service Worker（修复版本）
 async function registerSW() {
   if (!('serviceWorker' in navigator)) {
     log("❌ 浏览器不支持 Service Worker");
@@ -484,28 +511,43 @@ async function registerSW() {
   try {
     updateSWStatus('installing');
     
-    // 动态计算 Service Worker 路径
-    let swPath = 'sw.js';
-    if (BASE_PATH !== '/') {
-      swPath = `${BASE_PATH}/sw.js`.replace(/\/\//g, '/');
+    // 计算 Service Worker 路径和作用域
+    const swPath = getSWPath();
+    
+    // 对于 GitHub Pages，作用域必须是当前目录或子目录
+    let scope;
+    if (window.location.hostname.includes('github.io')) {
+      // GitHub Pages 的特殊处理：作用域必须是当前目录
+      scope = './';
+    } else {
+      scope = BASE_PATH;
     }
     
-    log(`📡 注册 Service Worker: ${swPath}, 作用域: ${BASE_PATH}`);
+    log(`📡 注册 Service Worker: ${swPath}, 作用域: ${scope}`);
     
     const registration = await navigator.serviceWorker.register(swPath, { 
-      scope: BASE_PATH,
-      updateViaCache: 'none'
+      scope: scope
     });
     
-    await navigator.serviceWorker.ready;
-    
-    // 发送 ping 检查连接
-    if (registration.active) {
+    // 等待 Service Worker 就绪
+    if (registration.installing) {
+      registration.installing.addEventListener('statechange', (e) => {
+        const sw = e.target;
+        log(`🔄 SW 状态: ${sw.state}`);
+        
+        if (sw.state === 'activated') {
+          updateSWStatus('registered');
+          
+          // 发送 ping 检查连接
+          if (registration.active) {
+            registration.active.postMessage({ type: "PING" });
+          }
+        }
+      });
+    } else if (registration.active) {
+      updateSWStatus('registered');
       registration.active.postMessage({ type: "PING" });
     }
-    
-    log(`✅ Service Worker 注册成功，作用域: ${registration.scope}`);
-    updateSWStatus('registered');
     
     // 监听更新
     registration.addEventListener('updatefound', () => {
@@ -513,6 +555,7 @@ async function registerSW() {
       log('🔄 发现 Service Worker 更新');
       
       newWorker.addEventListener('statechange', () => {
+        log(`🔄 新 SW 状态: ${newWorker.state}`);
         if (newWorker.state === 'installed') {
           log('🔄 新版本已安装，刷新页面即可使用');
         }

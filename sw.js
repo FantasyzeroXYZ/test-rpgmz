@@ -1,20 +1,29 @@
 let GAME_FILES = {};
-const CACHE_NAME = 'rpgmz-player-v2';
+const CACHE_NAME = 'rpgmz-player-v3';
 const APP_VERSION = '1.0.0';
 
 // 动态获取作用域路径
 const getScopePath = () => {
   // 对于 GitHub Pages，需要处理项目子路径
-  if (self.location.hostname.includes('github.io') || self.location.hostname.includes('github.dev')) {
+  const url = new URL(self.location.href);
+  
+  if (url.hostname.includes('github.io')) {
     // 从完整路径中提取项目路径
-    const pathSegments = self.location.pathname.split('/');
+    const pathSegments = url.pathname.split('/');
+    
     // 移除最后的文件名（如果有的话）
-    const projectPath = pathSegments.slice(0, -1).join('/');
+    let projectPath = '';
+    for (let i = 1; i < pathSegments.length - 1; i++) {
+      if (pathSegments[i]) {
+        projectPath += '/' + pathSegments[i];
+      }
+    }
+    
     return projectPath || '/';
   }
   
   // 本地开发环境
-  if (self.location.hostname === 'localhost' || self.location.hostname === '127.0.0.1') {
+  if (url.hostname === 'localhost' || url.hostname === '127.0.0.1') {
     return '/';
   }
   
@@ -23,19 +32,20 @@ const getScopePath = () => {
 };
 
 const SCOPE_PATH = getScopePath();
+const IS_GITHUB_PAGES = self.location.hostname.includes('github.io');
 
 self.addEventListener("install", e => {
   console.log(`[SW ${APP_VERSION}] 安装中，作用域: ${SCOPE_PATH || '/'}`);
+  console.log(`[SW] 当前路径: ${self.location.href}`);
+  console.log(`[SW] GitHub Pages: ${IS_GITHUB_PAGES}`);
+  
+  // 跳过等待，立即激活
   self.skipWaiting();
   
   e.waitUntil(
     caches.open(CACHE_NAME).then(cache => {
       // 预缓存关键文件
       const filesToCache = [];
-      if (SCOPE_PATH !== '/') {
-        // 如果是在子路径下，也缓存根路径的 sw.js
-        filesToCache.push('/sw.js');
-      }
       return cache.addAll(filesToCache);
     })
   );
@@ -62,15 +72,28 @@ self.addEventListener("activate", e => {
       })
     ]).then(() => {
       console.log(`[SW ${APP_VERSION}] 激活完成`);
+      
+      // 通知所有客户端 SW 已激活
+      return self.clients.matchAll().then(clients => {
+        clients.forEach(client => {
+          client.postMessage({ type: "SW_ACTIVATED", version: APP_VERSION });
+        });
+      });
     })
   );
 });
 
 self.addEventListener("message", e => {
+  console.log(`[SW] 收到消息: ${e.data?.type}`);
+  
   if (e.data?.type === "LOAD_GAME") {
     GAME_FILES = e.data.files || {};
     const count = Object.keys(GAME_FILES).length;
     console.log(`[SW] 游戏文件已加载: ${count} 个文件`);
+    
+    if (e.data.metadata) {
+      console.log(`[SW] 文件信息: ${JSON.stringify(e.data.metadata)}`);
+    }
     
     // 通知所有客户端准备就绪
     e.waitUntil(
@@ -84,7 +107,13 @@ self.addEventListener("message", e => {
   
   // 健康检查
   if (e.data?.type === "PING") {
-    e.source.postMessage({ type: "PONG", version: APP_VERSION, scope: SCOPE_PATH });
+    console.log(`[SW] 收到 PING，发送 PONG`);
+    e.source.postMessage({ 
+      type: "PONG", 
+      version: APP_VERSION, 
+      scope: SCOPE_PATH,
+      location: self.location.href 
+    });
   }
 });
 
@@ -105,7 +134,37 @@ self.addEventListener("fetch", e => {
     return;
   }
   
-  // 2. 处理游戏文件请求
+  // 2. 对于 GitHub Pages，处理 404.html 请求
+  if (IS_GITHUB_PAGES && requestPath.endsWith('/404.html')) {
+    e.respondWith(
+      fetch(e.request).catch(() => {
+        // 如果 404.html 不存在，返回一个简单的 404 页面
+        const html = `
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <meta charset="utf-8">
+            <title>404 - RPGMZ Player</title>
+          </head>
+          <body>
+            <h1>404 - Page Not Found</h1>
+            <p>Redirecting to main page...</p>
+            <script>
+              setTimeout(() => location.replace('/'), 1000);
+            </script>
+          </body>
+          </html>
+        `;
+        return new Response(html, {
+          status: 404,
+          headers: { 'Content-Type': 'text/html' }
+        });
+      })
+    );
+    return;
+  }
+  
+  // 3. 处理游戏文件请求
   // 构建游戏路径前缀
   let gamePathPrefix;
   if (SCOPE_PATH === '/') {
@@ -118,6 +177,13 @@ self.addEventListener("fetch", e => {
   const isGameRequest = requestPath.startsWith(gamePathPrefix) || 
                        (SCOPE_PATH === '/' && requestPath.startsWith('/game/'));
   
+  // 对于根路径的请求，检查是否是主页面
+  if (requestPath === SCOPE_PATH || requestPath === SCOPE_PATH + '/' || 
+      (SCOPE_PATH === '/' && (requestPath === '/' || requestPath === '/index.html'))) {
+    // 这是主页面请求，让浏览器处理
+    return;
+  }
+  
   if (!isGameRequest) {
     // 对于非游戏请求，尝试从缓存获取，否则使用网络
     e.respondWith(
@@ -128,12 +194,16 @@ self.addEventListener("fetch", e => {
     return;
   }
   
-  // 3. 处理游戏文件
+  // 4. 处理游戏文件
   // 提取请求的文件路径
   let requestedPath = requestPath;
-  if (SCOPE_PATH !== '/') {
-    requestedPath = requestPath.replace(SCOPE_PATH, '');
+  
+  // 移除作用域路径前缀
+  if (SCOPE_PATH !== '/' && requestedPath.startsWith(SCOPE_PATH)) {
+    requestedPath = requestedPath.substring(SCOPE_PATH.length);
   }
+  
+  // 移除 /game/ 前缀
   requestedPath = requestedPath.replace(/^\/game\//, '');
   
   // 如果是空路径或目录，默认为 index.html
@@ -148,11 +218,20 @@ self.addEventListener("fetch", e => {
     console.warn(`[SW] URL 解码失败: ${requestedPath}`, e);
   }
 
+  console.log(`[SW] 查找文件: ${requestedPath}`);
+  console.log(`[SW] 可用文件: ${Object.keys(GAME_FILES).slice(0, 5)}...`);
+
   // ==========================================
   // ⭐ 特殊处理：index.html (注入截图修复代码)
   // ==========================================
   if (requestedPath === "index.html" || requestedPath === "") {
     let htmlContent = GAME_FILES["index.html"];
+    
+    // 如果没有找到 index.html，尝试 www/index.html
+    if (!htmlContent && GAME_FILES["www/index.html"]) {
+      htmlContent = GAME_FILES["www/index.html"];
+      requestedPath = "www/index.html";
+    }
     
     if (htmlContent) {
       try {
@@ -192,9 +271,12 @@ self.addEventListener("fetch", e => {
         } else if (htmlStr.includes('<head ')) {
           // 处理 <head lang="en"> 这种情况
           htmlStr = htmlStr.replace(/<head\s[^>]*>/, '$&' + scriptToInject);
-        } else {
+        } else if (htmlStr.includes('<html>')) {
           // 如果没有 head 标签，在 html 标签后添加
           htmlStr = htmlStr.replace('<html>', '<html><head>' + scriptToInject + '</head>');
+        } else {
+          // 如果也没有 html 标签，直接添加到开头
+          htmlStr = scriptToInject + htmlStr;
         }
         
         const encoder = new TextEncoder();
@@ -209,6 +291,7 @@ self.addEventListener("fetch", e => {
         return;
       } catch (error) {
         console.error('[SW] 注入脚本失败:', error);
+        // 如果注入失败，返回原始内容
       }
     }
   }
@@ -273,6 +356,16 @@ self.addEventListener("fetch", e => {
     }
   }
 
+  // F. 尝试去掉扩展名查找
+  if (!body && requestedPath.includes('.')) {
+    const pathWithoutExt = requestedPath.replace(/\.[^/.]+$/, "");
+    if (GAME_FILES[pathWithoutExt]) {
+      body = GAME_FILES[pathWithoutExt];
+      foundPath = pathWithoutExt;
+      successType = '无扩展名匹配';
+    }
+  }
+
   // 最终响应
   if (body) {
     const ext = foundPath.split(".").pop().toLowerCase();
@@ -325,14 +418,15 @@ self.addEventListener("fetch", e => {
     e.respondWith(new Response(body, { headers }));
   } else {
     console.error("[SW] 文件未找到:", requestedPath);
-    console.log("[SW] 可用文件:", Object.keys(GAME_FILES).slice(0, 20));
+    console.log("[SW] 可用文件列表:", Object.keys(GAME_FILES));
     
     // 返回 404 响应，包含调试信息
     const debugInfo = {
       requested: requestedPath,
       availableFiles: Object.keys(GAME_FILES).length,
       scope: SCOPE_PATH,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      swVersion: APP_VERSION
     };
     
     e.respondWith(
