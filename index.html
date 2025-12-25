@@ -2,69 +2,442 @@
 <html lang="zh">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no">
   <title>RPGMZ Player (Pro) - 支持本地和在线部署</title>
   <link rel="stylesheet" href="./css/style.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🎮</text></svg>">
 </head>
 <body>
 
 <header>
-  <h3 style="margin: 0;">🎮 RPGMZ Player Pro</h3>
-  <input type="file" id="zip" accept=".zip,.ZIP" />
+  <h3 style="margin: 0; display: flex; align-items: center; gap: 10px;">
+    <span>🎮</span>
+    <span style="font-size: 16px;">RPGMZ Player Pro</span>
+  </h3>
+  
+  <input type="file" id="zip" accept=".zip,.ZIP" style="display: none;" />
+  <label for="zip" style="cursor: pointer;">
+    <button class="secondary" style="display: flex; align-items: center; gap: 5px;">
+      <span>📦</span>
+      <span>上传游戏ZIP</span>
+    </button>
+  </label>
+  
   <div class="status-bar">
-    <span id="sw-status">Service Worker: <span class="status-indicator" id="sw-indicator"></span></span>
+    <span id="sw-status">SW: <span class="status-indicator" id="sw-indicator"></span></span>
     <span id="game-status">游戏: <span class="status-indicator" id="game-indicator"></span></span>
     <span id="env-info"></span>
   </div>
+  
+  <div style="margin-left: auto; display: flex; gap: 8px; align-items: center;">
+    <!-- 存档管理 -->
+    <button class="icon-btn" id="save-manager-btn" title="存档管理">
+      <span>💾</span>
+    </button>
+    
+    <!-- 设置按钮 -->
+    <button class="icon-btn" id="settings-btn" title="设置">
+      <span>⚙️</span>
+    </button>
+    
+    <!-- 全屏按钮 -->
+    <button class="icon-btn" id="fullscreen-btn" title="全屏">
+      <span id="fullscreen-icon">⛶</span>
+    </button>
+  </div>
 </header>
 
+<!-- 设置面板 -->
+<div class="settings-panel" id="settings-panel">
+  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+    <h3 style="margin: 0; font-size: 16px;">⚙️ 设置</h3>
+    <button class="icon-btn" id="close-settings" style="padding: 5px;">
+      <span style="font-size: 16px;">×</span>
+    </button>
+  </div>
+  
+  <!-- 布局设置 -->
+  <div class="setting-group">
+    <h4>📐 布局设置</h4>
+    <div class="setting-item">
+      <label>侧边栏位置:</label>
+      <select id="sidebar-position">
+        <option value="right">右侧</option>
+        <option value="left">左侧</option>
+        <option value="both">两侧</option>
+        <option value="none">隐藏</option>
+      </select>
+    </div>
+    <div class="setting-item">
+      <label>游戏缩放:</label>
+      <select id="game-scale">
+        <option value="fit-both">适应两者</option>
+        <option value="fit-width">适应宽度</option>
+        <option value="fit-height">适应高度</option>
+        <option value="original">原始尺寸</option>
+      </select>
+    </div>
+    <div class="setting-item">
+      <label>显示对话侧边栏:</label>
+      <input type="checkbox" id="show-dialog-sidebar" checked>
+    </div>
+  </div>
+  
+  <!-- Anki 设置 -->
+  <div class="setting-group">
+    <h4>📚 Anki 设置</h4>
+    <div class="setting-item">
+      <label>AnkiConnect IP:</label>
+      <input type="text" id="anki-ip" value="127.0.0.1" placeholder="127.0.0.1">
+    </div>
+    <div class="setting-item">
+      <label>AnkiConnect 端口:</label>
+      <input type="number" id="anki-port" value="8765" placeholder="8765" min="1" max="65535">
+    </div>
+    <div style="display: flex; flex-direction: column; gap: 10px;">
+      <div style="display: flex; gap: 10px;">
+        <button class="secondary" id="test-anki-btn" style="flex: 1;">测试连接</button>
+        <div class="anki-status" style="flex: 1;">
+          <span class="anki-status-indicator" id="anki-status-indicator"></span>
+          <span id="anki-status-text">未连接</span>
+        </div>
+      </div>
+      
+      <!-- 连接测试状态 -->
+      <div id="anki-test-result" style="display: none;"></div>
+    </div>
+    
+    <!-- Anki 牌组和模板选择 -->
+    <div class="setting-item" style="flex-direction: column; align-items: flex-start; margin-top: 10px; gap: 5px;">
+      <label>牌组:</label>
+      <select id="anki-deck" style="width: 100%;" disabled>
+        <option value="">请先测试连接</option>
+      </select>
+    </div>
+    
+    <div class="setting-item" style="flex-direction: column; align-items: flex-start; gap: 5px;">
+      <label>模板:</label>
+      <select id="anki-model" style="width: 100%;" disabled>
+        <option value="">请先选择牌组</option>
+      </select>
+    </div>
+    
+    <!-- 字段映射 -->
+    <div id="anki-fields" style="display: none;">
+      <h4 style="margin-top: 15px; font-size: 13px; color: #aaa;">字段映射</h4>
+      <div class="setting-item">
+        <label>截图字段:</label>
+        <select id="anki-field-screenshot">
+          <option value="">不添加</option>
+        </select>
+      </div>
+      <div class="setting-item">
+        <label>文本字段:</label>
+        <select id="anki-field-text">
+          <option value="">不添加</option>
+        </select>
+      </div>
+      <div class="setting-item">
+        <label>游戏字段:</label>
+        <select id="anki-field-game">
+          <option value="">不添加</option>
+        </select>
+      </div>
+      <button id="add-to-anki-btn" style="width: 100%; margin-top: 10px;" disabled>
+        <span>➕</span>
+        <span>添加到 Anki 卡片</span>
+      </button>
+    </div>
+  </div>
+  
+  <!-- 存档管理 -->
+  <div class="setting-group">
+    <h4>💾 存档管理</h4>
+    <div class="controls-row" style="margin-bottom: 15px;">
+      <button class="secondary" id="load-save-btn" style="flex: 1;">
+        <span>📂</span>
+        <span>加载存档</span>
+      </button>
+      <button class="secondary" id="download-save-btn" style="flex: 1;">
+        <span>⬇️</span>
+        <span>下载存档</span>
+      </button>
+    </div>
+    <div id="save-files-container" style="display: none;">
+      <h5 style="margin: 10px 0 5px 0; font-size: 12px; color: #888;">存档文件列表:</h5>
+      <div id="save-files-list" style="max-height: 150px; overflow-y: auto;">
+        <!-- 存档文件列表将在这里显示 -->
+      </div>
+    </div>
+  </div>
+  
+  <!-- 高级设置 -->
+  <div class="setting-group">
+    <h4>🔧 高级设置</h4>
+    <div class="setting-item">
+      <label>自动提取文本:</label>
+      <input type="checkbox" id="auto-extract" checked>
+    </div>
+    <div class="setting-item">
+      <label>截图质量:</label>
+      <select id="screenshot-quality">
+        <option value="1.0">最高 (100%)</option>
+        <option value="0.8">高 (80%)</option>
+        <option value="0.6">中 (60%)</option>
+        <option value="0.4">低 (40%)</option>
+      </select>
+    </div>
+    <div class="setting-item">
+      <label>日志详细程度:</label>
+      <select id="log-level">
+        <option value="verbose">详细</option>
+        <option value="normal" selected>正常</option>
+        <option value="minimal">最小</option>
+      </select>
+    </div>
+  </div>
+</div>
+
+<!-- 存档管理面板 -->
+<div class="settings-panel" id="save-manager-panel" style="display: none;">
+  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+    <h3 style="margin: 0; font-size: 16px;">💾 存档管理</h3>
+    <button class="icon-btn" id="close-save-manager" style="padding: 5px;">
+      <span style="font-size: 16px;">×</span>
+    </button>
+  </div>
+  
+  <div id="save-manager-content">
+    <!-- 存档管理内容将在这里动态加载 -->
+  </div>
+</div>
+
 <div class="container">
-  <div class="game-area">
-    <iframe id="game" sandbox="allow-same-origin allow-scripts allow-popups allow-forms"></iframe>
+  <!-- 左侧浮动按钮 -->
+  <div class="floating-btn left" id="left-sidebar-toggle" style="display: none;">
+    <span style="font-size: 20px;">◀</span>
+  </div>
+  
+  <!-- 右侧浮动按钮 -->
+  <div class="floating-btn right" id="right-sidebar-toggle" style="display: none;">
+    <span style="font-size: 20px;">▶</span>
+  </div>
+  
+  <!-- 全屏底部按钮 -->
+  <div class="floating-btn bottom" id="toggle-dialog-btn" style="display: none;">
+    <span style="font-size: 20px;">💬</span>
+  </div>
+  
+  <div class="game-area" id="game-area">
+    <!-- 游戏加载占位符 -->
+    <div id="game-placeholder" style="display: flex; flex-direction: column; align-items: center; justify-content: center; color: #666; gap: 15px;">
+      <div style="font-size: 64px;">🎮</div>
+      <div style="text-align: center;">
+        <h3 style="color: #888; margin-bottom: 10px;">欢迎使用 RPGMZ Player Pro</h3>
+        <p style="color: #666; font-size: 14px; max-width: 300px;">
+          请点击上方的 "上传游戏ZIP" 按钮<br>
+          选择你的 RPG Maker MZ 游戏文件
+        </p>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 20px;">
+        <button class="secondary" onclick="document.getElementById('zip').click()">
+          <span>📦</span>
+          <span>选择游戏文件</span>
+        </button>
+        <button class="secondary" onclick="loadSampleGame()">
+          <span>🎲</span>
+          <span>加载示例游戏</span>
+        </button>
+      </div>
+    </div>
+    
+    <iframe id="game" sandbox="allow-same-origin allow-scripts allow-popups allow-forms" style="display: none;"></iframe>
     <div id="flash"></div>
   </div>
 
-  <div class="sidebar">
+  <!-- 左侧侧边栏 -->
+  <div class="sidebar sidebar-left" id="sidebar-left">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+      <h3 style="margin: 0;">💬 对话文本</h3>
+      <button class="icon-btn" id="close-left-sidebar" style="padding: 5px;">
+        <span style="font-size: 16px;">×</span>
+      </button>
+    </div>
+    
     <div class="panel">
-      <h3>💬 对话文本提取</h3>
       <div class="controls-row">
         <div class="checkbox-container">
           <input type="checkbox" id="auto-sync" checked>
           <label for="auto-sync">自动同步</label>
         </div>
-        <button class="secondary" onclick="extractText()" title="手动提取当前对话">
-          📝 手动提取
+        <button class="secondary" onclick="extractText()" title="手动提取当前对话" style="flex: 1;">
+          <span>📝</span>
+          <span>手动提取</span>
         </button>
-        <button class="secondary" onclick="clearText()" title="清空文本框">
-          🗑️ 清空
+        <button class="secondary" onclick="clearText()" title="清空文本框" style="flex: 1;">
+          <span>🗑️</span>
+          <span>清空</span>
         </button>
       </div>
       <textarea id="game-text" placeholder="当前没有对话..."></textarea>
+      <div style="display: flex; gap: 5px; margin-top: 5px;">
+        <button onclick="copyText()" title="复制文本" style="flex: 1; padding: 8px;">
+          <span>📋</span>
+          <span>复制</span>
+        </button>
+        <button onclick="saveText()" title="保存文本" style="flex: 1; padding: 8px;">
+          <span>💾</span>
+          <span>保存</span>
+        </button>
+      </div>
     </div>
 
     <div class="panel">
       <h3>📷 截图功能</h3>
       <div class="controls-row">
-        <button onclick="takeScreenshot()" title="截取游戏画面">
-          📸 截取画面
+        <button onclick="takeScreenshot()" title="截取游戏画面" style="flex: 1;">
+          <span>📸</span>
+          <span>截取画面</span>
         </button>
-        <button class="secondary" onclick="downloadScreenshot()" title="下载截图" id="download-btn" disabled>
-          ⬇️ 下载截图
+        <button class="secondary" onclick="downloadScreenshot()" title="下载截图" id="download-btn" disabled style="flex: 1;">
+          <span>⬇️</span>
+          <span>下载截图</span>
         </button>
       </div>
       <img id="screenshot-img" />
-      <p id="screenshot-tip" style="font-size:12px; color:#888; display:none; margin: 5px 0 0 0;">
-        已捕获 (右键可保存)
+      <div id="screenshot-actions" style="display: none; margin-top: 10px;">
+        <div class="controls-row">
+          <button class="secondary" onclick="copyScreenshot()" style="flex: 1;">
+            <span>📋</span>
+            <span>复制</span>
+          </button>
+          <button class="secondary" onclick="shareScreenshot()" style="flex: 1;">
+            <span>📤</span>
+            <span>分享</span>
+          </button>
+        </div>
+      </div>
+      <p id="screenshot-tip" style="font-size:12px; color:#888; margin: 5px 0 0 0;">
+        截图将显示在这里
       </p>
     </div>
 
     <div class="panel">
-      <h3>⚙️ 调试信息</h3>
-      <div id="debug-info">等待加载...</div>
+      <h3>📊 游戏信息</h3>
+      <div id="game-info" style="font-size: 12px; line-height: 1.5;">
+        <div>状态: <span id="game-state">等待加载</span></div>
+        <div>帧率: <span id="game-fps">-</span> FPS</div>
+        <div>内存: <span id="game-memory">-</span></div>
+        <div>时间: <span id="game-time">-</span></div>
+      </div>
     </div>
 
-    <div id="log">等待 ZIP 文件上传...</div>
+    <div id="log-container">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
+        <h3 style="margin: 0; font-size: 14px;">📝 日志</h3>
+        <button class="icon-btn" onclick="clearLog()" title="清空日志" style="padding: 3px; font-size: 12px;">
+          清空
+        </button>
+      </div>
+      <div id="log">等待 ZIP 文件上传...</div>
+    </div>
   </div>
+
+  <!-- 右侧侧边栏 -->
+  <div class="sidebar sidebar-right" id="sidebar-right">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+      <h3 style="margin: 0;">📚 Anki & 存档</h3>
+      <button class="icon-btn" id="close-right-sidebar" style="padding: 5px;">
+        <span style="font-size: 16px;">×</span>
+      </button>
+    </div>
+    
+    <div class="panel">
+      <h3>📚 Anki 操作</h3>
+      <div class="anki-status" style="margin-bottom: 10px;">
+        <span class="anki-status-indicator" id="anki-sidebar-status"></span>
+        <span id="anki-sidebar-text">Anki: 未连接</span>
+      </div>
+      <div class="controls-row">
+        <button class="secondary" id="anki-refresh-btn" style="flex: 1;">
+          <span>🔄</span>
+          <span>刷新卡片</span>
+        </button>
+        <button class="secondary" id="anki-settings-btn" style="flex: 1;">
+          <span>⚙️</span>
+          <span>设置</span>
+        </button>
+      </div>
+      
+      <div style="margin-top: 10px;">
+        <div style="font-size: 12px; color: #888; margin-bottom: 5px;">最近卡片:</div>
+        <div id="anki-cards-list" style="max-height: 200px; overflow-y: auto; background: rgba(0,0,0,0.1); border-radius: 4px; padding: 5px;">
+          <div style="color: #666; text-align: center; padding: 20px;">未连接 Anki</div>
+        </div>
+      </div>
+      
+      <div style="margin-top: 10px;">
+        <button id="add-to-another-card-btn" style="width: 100%;" disabled>
+          <span>➕</span>
+          <span>添加到选中卡片</span>
+        </button>
+      </div>
+    </div>
+    
+    <div class="panel">
+      <h3>💾 快速存档</h3>
+      <div id="quick-save-slots" style="display: grid; grid-template-columns: 1fr 1fr; gap: 5px;">
+        <!-- 快速存档槽位将在这里生成 -->
+      </div>
+      <div class="controls-row" style="margin-top: 10px;">
+        <button class="secondary" onclick="quickSave()" style="flex: 1;">
+          <span>💾</span>
+          <span>快速存档</span>
+        </button>
+        <button class="secondary" onclick="quickLoad()" style="flex: 1;" disabled id="quick-load-btn">
+          <span>🔄</span>
+          <span>快速读档</span>
+        </button>
+      </div>
+    </div>
+    
+    <div class="panel">
+      <h3>⚡ 快捷操作</h3>
+      <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px;">
+        <button class="icon-btn" onclick="toggleFullscreen()" title="全屏">
+          <span>⛶</span>
+        </button>
+        <button class="icon-btn" onclick="resetGame()" title="重置游戏">
+          <span>🔄</span>
+        </button>
+        <button class="icon-btn" onclick="reloadGame()" title="重新加载">
+          <span>📄</span>
+        </button>
+        <button class="icon-btn" onclick="muteGame()" title="静音">
+          <span>🔇</span>
+        </button>
+        <button class="icon-btn" onclick="speedUpGame()" title="加速">
+          <span>⏩</span>
+        </button>
+        <button class="icon-btn" onclick="slowDownGame()" title="减速">
+          <span>⏪</span>
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 文件上传进度 -->
+<div id="upload-progress" style="display: none; position: fixed; top: 0; left: 0; right: 0; background: rgba(0,0,0,0.9); color: white; padding: 10px; z-index: 2000; text-align: center;">
+  <div>正在处理文件... <span id="upload-progress-text">0%</span></div>
+  <div class="progress-bar">
+    <div class="progress-fill" id="upload-progress-bar"></div>
+  </div>
+</div>
+
+<!-- 通知 -->
+<div id="notification" style="display: none; position: fixed; bottom: 20px; right: 20px; background: #333; color: white; padding: 15px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); z-index: 2000; max-width: 300px;">
+  <div id="notification-content"></div>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>

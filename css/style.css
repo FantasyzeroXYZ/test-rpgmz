@@ -17,6 +17,9 @@ header {
     align-items: center; 
     gap: 15px; 
     flex-wrap: wrap;
+    position: relative;
+    z-index: 100;
+    min-height: 60px;
 }
 
 .container { 
@@ -24,37 +27,78 @@ header {
     flex: 1; 
     height: calc(100vh - 60px); 
     overflow: hidden;
+    position: relative;
 }
 
 .game-area { 
-    flex: 3; 
+    flex: 1; 
     background: #000; 
     display: flex; 
     justify-content: center; 
     align-items: center; 
     position: relative; 
     min-width: 0;
+    transition: margin 0.3s ease;
+    overflow: hidden;
 }
+
+.game-area.fit-width iframe { width: 100% !important; height: auto !important; }
+.game-area.fit-height iframe { width: auto !important; height: 100% !important; }
+.game-area.fit-both iframe { width: 100% !important; height: 100% !important; }
+.game-area.original iframe { width: auto !important; height: auto !important; }
 
 iframe { 
-    width: 100%; 
-    height: 100%; 
     border: none; 
     background: #000;
+    display: block;
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
 }
 
+/* 可折叠侧边栏 */
 .sidebar { 
-    flex: 1; 
-    min-width: 300px; 
-    max-width: 400px; 
+    width: 300px; 
     background: #252526; 
-    border-left: 1px solid #333; 
+    border: 1px solid #333; 
     display: flex; 
     flex-direction: column; 
     padding: 15px; 
     gap: 15px; 
     overflow-y: auto; 
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    z-index: 10;
+    transition: transform 0.3s ease;
+    box-shadow: 2px 0 10px rgba(0,0,0,0.3);
 }
+
+.sidebar-left { 
+    left: 0; 
+    transform: translateX(-100%);
+    border-left: none;
+    border-right: 1px solid #333;
+}
+
+.sidebar-left.active { 
+    transform: translateX(0);
+}
+
+.sidebar-right { 
+    right: 0; 
+    transform: translateX(100%);
+    border-right: none;
+    border-left: 1px solid #333;
+}
+
+.sidebar-right.active { 
+    transform: translateX(0);
+}
+
+/* 侧边栏显示时的游戏区域调整 */
+.game-area.with-left-sidebar { margin-left: 300px; }
+.game-area.with-right-sidebar { margin-right: 300px; }
+.game-area.with-both-sidebars { margin-left: 300px; margin-right: 300px; }
 
 .panel { 
     background: #333; 
@@ -89,10 +133,12 @@ textarea#game-text {
 
 #screenshot-img { 
     max-width: 100%; 
+    max-height: 200px; 
     border: 1px solid #555; 
     display: none; 
     margin-top: 5px; 
     border-radius: 4px;
+    object-fit: contain;
 }
 
 button { 
@@ -104,14 +150,17 @@ button {
     border-radius: 4px; 
     font-size: 14px;
     font-weight: 500;
-    transition: background 0.2s;
+    transition: all 0.2s;
     display: inline-flex;
     align-items: center;
+    justify-content: center;
     gap: 5px;
+    min-height: 36px;
 }
 
 button:hover { 
     background: #1177bb; 
+    transform: translateY(-1px);
 }
 
 button.secondary { 
@@ -120,6 +169,21 @@ button.secondary {
 
 button.secondary:hover { 
     background: #555; 
+}
+
+button.icon-btn {
+    background: transparent;
+    padding: 8px;
+    border-radius: 50%;
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+button.icon-btn:hover {
+    background: rgba(255,255,255,0.1);
 }
 
 #log { 
@@ -135,6 +199,7 @@ button.secondary:hover {
     border: 1px solid #333;
     max-height: 200px;
     overflow-y: auto;
+    user-select: text;
 }
 
 /* 截图闪光特效 */
@@ -156,11 +221,13 @@ button.secondary:hover {
     align-items: center;
     gap: 8px;
     margin-bottom: 10px;
+    cursor: pointer;
 }
 
 .checkbox-container input[type="checkbox"] {
     width: 16px;
     height: 16px;
+    cursor: pointer;
 }
 
 .status-bar {
@@ -170,6 +237,7 @@ button.secondary:hover {
     font-size: 12px;
     color: #888;
     margin-top: 5px;
+    flex-wrap: wrap;
 }
 
 .status-indicator {
@@ -205,4 +273,372 @@ button.secondary:hover {
     background: #1a1a1a;
     border-radius: 3px;
     margin-top: 5px;
+    line-height: 1.4;
+}
+
+/* 设置按钮样式 */
+.settings-btn {
+    margin-left: auto;
+}
+
+/* 全屏样式 */
+body.fullscreen {
+    padding-top: 0;
+}
+
+body.fullscreen header {
+    display: none;
+}
+
+body.fullscreen .container {
+    height: 100vh;
+}
+
+/* 浮动操作按钮 */
+.floating-btn {
+    position: fixed;
+    z-index: 1000;
+    background: rgba(30, 30, 30, 0.9);
+    border: 1px solid #444;
+    border-radius: 50%;
+    width: 50px;
+    height: 50px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    backdrop-filter: blur(10px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+}
+
+.floating-btn:hover {
+    background: rgba(40, 40, 40, 0.95);
+    transform: scale(1.1);
+    box-shadow: 0 6px 16px rgba(0,0,0,0.4);
+}
+
+.floating-btn.left {
+    left: 20px;
+    top: 50%;
+    transform: translateY(-50%);
+}
+
+.floating-btn.right {
+    right: 20px;
+    top: 50%;
+    transform: translateY(-50%);
+}
+
+.floating-btn.bottom {
+    bottom: 20px;
+    right: 20px;
+}
+
+/* 设置面板 */
+.settings-panel {
+    background: #252526;
+    border: 1px solid #333;
+    border-radius: 8px;
+    padding: 20px;
+    position: fixed;
+    top: 70px;
+    right: 20px;
+    width: 350px;
+    max-height: calc(100vh - 100px);
+    overflow-y: auto;
+    z-index: 1000;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+    display: none;
+    backdrop-filter: blur(10px);
+}
+
+.settings-panel.active {
+    display: block;
+    animation: slideIn 0.3s ease;
+}
+
+@keyframes slideIn {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.setting-group {
+    margin-bottom: 20px;
+    padding-bottom: 15px;
+    border-bottom: 1px solid #333;
+}
+
+.setting-group:last-child {
+    border-bottom: none;
+    margin-bottom: 0;
+}
+
+.setting-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+    gap: 10px;
+}
+
+.setting-item label {
+    font-size: 14px;
+    color: #ccc;
+    flex-shrink: 0;
+}
+
+.setting-item select,
+.setting-item input[type="text"],
+.setting-item input[type="number"] {
+    background: #1e1e1e;
+    color: #fff;
+    border: 1px solid #444;
+    padding: 8px 12px;
+    border-radius: 4px;
+    min-width: 120px;
+    flex: 1;
+}
+
+.setting-item select:focus,
+.setting-item input:focus {
+    outline: none;
+    border-color: #0e639c;
+}
+
+/* Anki 连接状态 */
+.anki-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    margin-top: 5px;
+    padding: 5px 10px;
+    background: rgba(0,0,0,0.2);
+    border-radius: 4px;
+}
+
+.anki-status-indicator {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #888;
+}
+
+.anki-status-indicator.connected {
+    background: #4CAF50;
+    animation: pulse 2s infinite;
+}
+
+/* 存档文件列表 */
+.save-file-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px;
+    margin-bottom: 5px;
+    background: rgba(0,0,0,0.2);
+    border-radius: 4px;
+    border: 1px solid transparent;
+    transition: all 0.2s;
+    cursor: pointer;
+}
+
+.save-file-item:hover {
+    background: rgba(0,0,0,0.3);
+    border-color: #444;
+}
+
+.save-file-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.save-file-name {
+    font-size: 12px;
+    color: #eee;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.save-file-details {
+    font-size: 10px;
+    color: #888;
+    margin-top: 2px;
+}
+
+.save-file-actions {
+    display: flex;
+    gap: 5px;
+}
+
+/* 进度条 */
+.progress-bar {
+    width: 100%;
+    height: 4px;
+    background: #333;
+    border-radius: 2px;
+    overflow: hidden;
+    margin: 5px 0;
+}
+
+.progress-fill {
+    height: 100%;
+    background: #4CAF50;
+    transition: width 0.3s ease;
+    width: 0%;
+}
+
+/* 错误提示 */
+.error-message {
+    background: rgba(244, 67, 54, 0.1);
+    border: 1px solid rgba(244, 67, 54, 0.3);
+    color: #f44336;
+    padding: 10px;
+    border-radius: 4px;
+    margin: 10px 0;
+    font-size: 12px;
+}
+
+/* 成功提示 */
+.success-message {
+    background: rgba(76, 175, 80, 0.1);
+    border: 1px solid rgba(76, 175, 80, 0.3);
+    color: #4CAF50;
+    padding: 10px;
+    border-radius: 4px;
+    margin: 10px 0;
+    font-size: 12px;
+}
+
+/* 移动端适配 */
+@media (max-width: 768px) {
+    header {
+        padding: 10px;
+        gap: 10px;
+    }
+    
+    .sidebar {
+        width: 85%;
+        max-width: 300px;
+    }
+    
+    .game-area.with-left-sidebar { margin-left: 85%; }
+    .game-area.with-right-sidebar { margin-right: 85%; }
+    
+    .floating-btn {
+        width: 40px;
+        height: 40px;
+        font-size: 16px;
+    }
+    
+    .floating-btn.left {
+        left: 10px;
+    }
+    
+    .floating-btn.right {
+        right: 10px;
+    }
+    
+    .floating-btn.bottom {
+        bottom: 10px;
+        right: 10px;
+    }
+    
+    .settings-panel {
+        width: 90%;
+        max-width: 320px;
+        right: 5%;
+        left: 5%;
+    }
+    
+    .setting-item {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 5px;
+    }
+    
+    .setting-item label {
+        width: 100%;
+    }
+    
+    .setting-item select,
+    .setting-item input[type="text"],
+    .setting-item input[type="number"] {
+        width: 100%;
+        min-width: 0;
+    }
+}
+
+@media (max-width: 480px) {
+    .sidebar {
+        width: 100%;
+        max-width: 100%;
+    }
+    
+    .game-area.with-left-sidebar { margin-left: 100%; }
+    .game-area.with-right-sidebar { margin-right: 100%; }
+    
+    .floating-btn {
+        width: 35px;
+        height: 35px;
+        font-size: 14px;
+    }
+    
+    button {
+        padding: 8px 12px;
+        font-size: 13px;
+    }
+    
+    .controls-row {
+        gap: 8px;
+    }
+    
+    .panel {
+        padding: 12px;
+    }
+}
+
+/* 触摸设备优化 */
+@media (hover: none) and (pointer: coarse) {
+    button {
+        min-height: 44px;
+        padding: 12px 16px;
+    }
+    
+    .checkbox-container {
+        min-height: 44px;
+    }
+    
+    .floating-btn {
+        width: 56px;
+        height: 56px;
+    }
+}
+
+/* 滚动条美化 */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: rgba(0, 0, 0, 0.1);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.3);
 }
