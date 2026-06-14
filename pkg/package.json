@@ -1,0 +1,17 @@
+{
+  "name": "rm-wasm-vfs",
+  "type": "module",
+  "description": "WASM Virtual File System for RPG Maker MZ H5 games",
+  "version": "1.0.0",
+  "license": "MIT",
+  "files": [
+    "rm_wasm_vfs_bg.wasm",
+    "rm_wasm_vfs.js",
+    "rm_wasm_vfs.d.ts"
+  ],
+  "main": "rm_wasm_vfs.js",
+  "types": "rm_wasm_vfs.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}

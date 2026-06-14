@@ -1,0 +1,14 @@
+{
+  "name": "rm-wasm-vfs",
+  "version": "1.0.0",
+  "description": "RPG Maker MZ WASM Virtual File System — H5 game runner",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "npx http-server . -p 8080 -a 0.0.0.0 -c-1 --cors",
+    "start": "npx http-server . -p 8080 -a 0.0.0.0 -c-1 --cors",
+    "build:wasm": "wasm-pack build --target web"
+  },
+  "keywords": ["rpg-maker-mz", "wasm", "h5-game", "virtual-filesystem"],
+  "license": "MIT"
+}

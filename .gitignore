@@ -1,1 +1,8 @@
-.history/
+node_modules/
+target/
+*.zip
+.DS_Store
+debug.log
+# Keep pkg (WASM files needed for deployment)
+# Keep fonts (extracted game fonts)
+# Keep libs (offline CDN deps)
