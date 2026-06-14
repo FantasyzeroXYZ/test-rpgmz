@@ -3,6 +3,8 @@ target/
 *.zip
 .DS_Store
 debug.log
+.claude/
+.history/
 # Keep pkg (WASM files needed for deployment)
 # Keep fonts (extracted game fonts)
 # Keep libs (offline CDN deps)

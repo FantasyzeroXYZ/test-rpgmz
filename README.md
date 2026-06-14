@@ -1,18 +1,8 @@
-# rm-wasm-vfs — RPG Maker MV/MZ Browser Runner
-
-基于 Rust WebAssembly 的 RPG Maker MV/MZ H5 游戏全静态网页运行器，支持游戏库管理、存档导入导出、剧情文本提取、生词本、截图、蓝牙手柄、虚拟手柄等功能。
+# RPG Maker MV/MZ Browser Runner
 
 ---
 
 ## 快速开始
-
-```bash
-git clone https://github.com/你的用户名/rm-wasm-vfs.git   # ⬅️ 改这里
-cd rm-wasm-vfs
-npm run dev
-```
-
-浏览器打开 `http://127.0.0.1:8080/index.html`。
 
 ---
 
@@ -82,28 +72,3 @@ rm-wasm-vfs/
 ├── .github/workflows/      # GitHub Actions 自动部署
 └── .gitignore
 ```
-
----
-
-## 功能
-
-- 游戏库管理（IndexedDB 持久存储，九宫格/列表视图）
-- 支持 RPG Maker MV 和 MZ（自动检测）
-- NW.js 加密部署版自动解密
-- 存档导入/导出/删除（MZ: localforage, MV: localStorage）
-- 剧情文本提取（手动/自动，事件驱动无轮询）
-- 浮动文本面板 + 对话历史
-- 生词本 + Google Translate 翻译 + CSV 导出
-- Anki 制卡（AnkiConnect API）
-- Yomitan 词典导入查词
-- 截图（WebGL PIXI 提取 + 预览/保存/设为封面）
-- 蓝牙手柄支持（Gamepad API）
-- 虚拟触屏手柄（移动端横竖屏自适应）
-- 浏览器 TTS 语音朗读（发音人选择）
-- 全屏模式 + 工具栏自动隐藏
-- 响应式布局（桌面/平板/手机）
-- GitHub Pages 一键部署
-
-## License
-
-MIT
