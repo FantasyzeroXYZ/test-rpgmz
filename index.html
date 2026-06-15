@@ -2,562 +2,587 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>RPG Maker MZ — WASM VFS Runner</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no">
+<title>RPGMZ Player Pro — WASM VFS Runner</title>
 <script src="libs/jszip.min.js"></script>
 <script src="libs/localforage.min.js"></script>
 <style>
+/* ============================================================
+   OLD-VERSION MATCHING STYLE — clean VS Code dark theme
+   ============================================================ */
 :root {
-    --bg:#1a1a2e; --panel:#16213e; --accent:#e94560; --accent2:#0f3460;
-    --text:#eee; --text2:#ccc; --border:#333; --accent3:#1b4d3e;
-    --ui-scale:1; --sidebar-w:340px;
+  --bg:#1e1e1e; --panel:#252526; --card:#333; --border:#444;
+  --accent:#0e639c; --accent-hover:#1177bb;
+  --text:#eee; --text2:#ccc; --mute:#888;
+  --red:#f44336; --green:#4CAF50;
+  --sidebar-w:300px; --header-h:52px;
 }
-*{box-sizing:border-box; margin:0; padding:0;}
+*{box-sizing:border-box;margin:0;padding:0;}
 body{
-    font-family:'Segoe UI',system-ui,sans-serif;
-    background:var(--bg); color:var(--text);
-    height:100vh; width:100vw; overflow:hidden;
-    display:flex; flex-direction:column;
+  font-family:"Segoe UI","Microsoft YaHei",sans-serif;
+  background:var(--bg);color:var(--text);
+  height:100vh;display:flex;flex-direction:column;overflow:hidden;
 }
 
-/* ===== TOOLBAR ===== */
-#toolbar{
-    display:flex; align-items:center; gap:6px;
-    padding:8px 12px; background:var(--panel);
-    border-bottom:1px solid var(--border); flex-shrink:0;
-    flex-wrap:wrap; z-index:100; min-height:44px;
-    position:sticky; top:0; transition:transform .3s;
+/* ---- Header (fixed overlay, z-index:100) ---- */
+header{
+  position:fixed;top:0;left:0;right:0;
+  padding:6px 10px;background:var(--panel);border-bottom:1px solid var(--border);
+  display:flex;align-items:center;gap:8px;flex-shrink:0;
+  z-index:100;min-height:var(--header-h);flex-wrap:wrap;
+  transition:transform .3s ease;
 }
-#toolbar label.btn, #toolbar button{
-    display:inline-flex; align-items:center; gap:4px;
-    padding:6px 12px; background:var(--accent2);
-    color:var(--text); border:1px solid var(--border);
-    border-radius:6px; cursor:pointer; font-size:13px;
-    white-space:nowrap; transition:background .15s;
-}
-#toolbar label.btn:hover, #toolbar button:hover{background:var(--accent);border-color:var(--accent);}
-#toolbar input[type="file"]{display:none;}
-#toolbar .sep{width:1px;height:24px;background:var(--border);margin:0 4px;}
-#toolbar.fs-hidden{transform:translateY(-100%);position:fixed;top:0;left:0;right:0;}
-#status{
-    flex:1; font-size:12px; color:var(--text2);
-    min-width:100px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
-}
-#progress-wrap{width:140px;height:5px;background:#222;border-radius:3px;overflow:hidden;flex-shrink:0;}
-#progress-bar{height:100%;width:0%;background:var(--accent);transition:width .1s linear;border-radius:3px;}
+header h3{margin:0;font-size:14px;display:flex;align-items:center;gap:6px;white-space:nowrap;}
+header h3 span:last-child{transition:opacity .2s;}
+header .sep{width:1px;height:20px;background:var(--border);margin:0 2px;}
+.status-bar{display:flex;align-items:center;gap:8px;font-size:10px;color:var(--mute);flex:1;min-width:0;overflow:hidden;}
+.status-bar .dot{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--mute);flex-shrink:0;}
+.status-bar .dot.active{background:var(--green);animation:pulse 2s infinite;}
+@keyframes pulse{0%{opacity:1}50%{opacity:.5}100%{opacity:1}}
+header .actions{display:flex;gap:4px;align-items:center;margin-left:auto;flex-shrink:0;}
 
-/* ===== MAIN AREA ===== */
-#main{flex:1;display:flex;overflow:hidden;position:relative;}
+/* Fullscreen: header slides up out of view */
+body.fs-active header{transform:translateY(-100%);}
+/* Tap near top edge to reveal header */
+body.fs-active .fs-hotzone{display:block;}
+.fs-hotzone{display:none;position:fixed;top:0;left:0;right:0;height:8px;z-index:200;}
 
-/* ===== GAME AREA ===== */
-#game-wrap{
-    flex:1; background:#000; position:relative;
-    overflow:hidden; min-height:0; min-width:0;
-    display:flex; align-items:center; justify-content:center;
+/* Mobile header: single row, icon-only */
+@media(max-width:768px){
+  header{padding:4px 6px;gap:4px;min-height:40px;flex-wrap:nowrap;}
+  header h3{font-size:14px;margin-right:2px;}
+  header .sep{display:none;}
+  header .actions{gap:2px;flex-shrink:0;}
+  header button,header label.btn{padding:4px 7px;font-size:11px;min-height:28px;}
+  header button.icon-btn{width:28px;height:28px;padding:3px;font-size:13px;}
+  header button .btn-text{display:none;}
 }
-#game-iframe{
-    border:none; display:block; overflow:hidden;
-    flex-shrink:0;
+@media(max-width:480px){
+  header{padding:3px 4px;gap:2px;min-height:36px;}
+  header h3{font-size:13px;}
+  header button,header label.btn{padding:3px 5px;font-size:10px;min-height:26px;}
+  header button.icon-btn{width:26px;height:26px;padding:2px;font-size:12px;}
 }
-/* Floating bottom text panel */
-#text-overlay{
-    position:absolute; bottom:8px; left:10%; right:10%; z-index:5;
-    transition:all .25s; display:flex; flex-direction:column;
-    pointer-events:none;
+
+/* ---- Buttons ---- */
+button, label.btn{
+  background:var(--accent);color:#fff;border:none;padding:7px 14px;
+  cursor:pointer;border-radius:4px;font-size:13px;font-weight:500;
+  transition:all .2s;display:inline-flex;align-items:center;gap:5px;
+  min-height:34px;font-family:inherit;white-space:nowrap;
 }
-#text-overlay:not(.collapsed){
-    background:rgba(0,0,0,var(--ov-opacity,0.85));
-    border:1px solid rgba(255,255,255,0.15);
-    border-radius:8px; max-height:45vh; pointer-events:auto;
+button:hover,label.btn:hover{background:var(--accent-hover);transform:translateY(-1px);}
+button.secondary,label.btn.secondary{background:var(--card);}
+button.secondary:hover,label.btn.secondary:hover{background:#444;}
+button.icon-btn{
+  background:transparent;padding:7px;border-radius:50%;
+  width:34px;height:34px;min-height:unset;
+  display:flex;align-items:center;justify-content:center;font-size:15px;
 }
-#text-overlay.collapsed{
-    left:auto; right:8px; bottom:8px; width:auto;
+button.icon-btn:hover{background:rgba(255,255,255,.1);transform:none;}
+button.danger{background:var(--red);}
+button.danger:hover{background:#d32f2f;}
+button:disabled{opacity:.4;cursor:not-allowed;transform:none;}
+
+/* ---- Layout: views fill entire viewport ---- */
+#home-view{
+  position:fixed;inset:0;z-index:1;
+  display:flex;flex-direction:column;overflow:hidden;
+  padding-top:var(--header-h);
 }
-/* Small round expand button */
+#home-view.hidden{display:none !important;}
+#game-view{
+  position:fixed;inset:0;z-index:1;
+  overflow:hidden;
+}
+#game-view.hidden{display:none !important;}
+
+/* ---- Container & Game Area (base layer, z-index:1) ---- */
+.container{position:absolute;inset:0;z-index:1;}
+.game-area{
+  position:absolute;inset:0;z-index:1;
+  background:#000;display:flex;justify-content:center;
+  align-items:center;overflow:hidden;
+}
+/* Game area NEVER shifts — sidebars overlay on top */
+#game-iframe{border:none;background:#000;display:block;flex-shrink:0;image-rendering:pixelated;image-rendering:crisp-edges;max-width:100vw;max-height:100vh;object-fit:contain;}
+#game-placeholder{display:flex;flex-direction:column;align-items:center;justify-content:center;color:#666;gap:12px;text-align:center;}
+#game-placeholder>*{position:relative;z-index:2;}
+
+/* Mobile sidebar refinements */
+@media(max-width:768px){
+  :root{--sidebar-w:85vw;}
+  .sidebar{width:85%;max-width:280px;padding:10px;gap:8px;}
+  .floating-btn{width:40px;height:40px;font-size:16px;}
+  .floating-btn.left{left:8px;}
+  .floating-btn.right{right:8px;}
+  .floating-btn.bottom{bottom:12px;right:12px;}
+}
+@media(max-width:480px){
+  .sidebar{width:100%;max-width:100%;padding:8px;gap:6px;}
+  .floating-btn{width:36px;height:36px;font-size:14px;}
+}
+
+/* ---- Sidebars: fixed overlays, float on top of game (z-index:50) ---- */
+.sidebar{
+  width:var(--sidebar-w);background:var(--panel);border:1px solid var(--border);
+  display:flex;flex-direction:column;padding:14px;gap:12px;overflow-y:auto;
+  position:fixed;top:var(--header-h);bottom:0;z-index:50;
+  transition:transform .3s ease;box-shadow:0 0 20px rgba(0,0,0,.4);
+}
+.sidebar-left{left:0;transform:translateX(-100%);border-left:none;border-right:1px solid var(--border);}
+.sidebar-left.active{transform:translateX(0);}
+.sidebar-right{right:0;transform:translateX(0);border-right:none;border-left:1px solid var(--border);}
+.sidebar-right.collapsed{transform:translateX(100%);}
+
+
+/* ---- Floating Toggle Buttons (fixed, z-index:60 above sidebars) ---- */
+.floating-btn{
+  position:fixed;z-index:60;background:rgba(30,30,30,.9);
+  border:1px solid var(--border);border-radius:50%;
+  width:44px;height:44px;display:flex;align-items:center;justify-content:center;
+  cursor:pointer;transition:all .3s ease;backdrop-filter:blur(10px);
+  box-shadow:0 4px 12px rgba(0,0,0,.3);color:var(--text);font-size:18px;
+}
+.floating-btn:hover{background:rgba(40,40,40,.95);transform:scale(1.1);}
+.floating-btn.left{left:12px;top:35%;transform:translateY(-50%);}
+.floating-btn.right{right:12px;top:35%;transform:translateY(-50%);}
+.floating-btn.right:hover{transform:translateY(-50%) scale(1.1);}
+.floating-btn.left:hover{transform:translateY(-50%) scale(1.1);}
+.floating-btn.bottom{bottom:calc(var(--header-h) + 16px);right:16px;}
+.floating-btn.top-left{top:calc(var(--header-h) + 12px);left:12px;}
 #btn-ov-expand{
-    display:none; width:36px; height:36px; border-radius:50%;
-    background:rgba(0,0,0,0.85); border:1px solid rgba(255,255,255,0.2);
-    color:var(--accent); cursor:pointer; font-size:16px;
-    align-items:center; justify-content:center; z-index:6;
-    pointer-events:auto;
+  display:none;position:fixed;top:calc(var(--header-h) + 12px);left:12px;z-index:61;
+  width:40px;height:40px;border-radius:50%;
+  background:rgba(30,30,30,.9);border:1px solid var(--border);
+  color:var(--text);cursor:pointer;font-size:16px;
+  align-items:center;justify-content:center;
+  backdrop-filter:blur(10px);box-shadow:0 4px 12px rgba(0,0,0,.3);
+  transition:all .3s ease;pointer-events:auto;
 }
 #text-overlay.collapsed #btn-ov-expand{display:flex;}
 #text-overlay:not(.collapsed) #btn-ov-expand{display:none;}
-#text-overlay-bar{
-    display:flex; align-items:center; gap:6px; padding:4px 10px;
-    cursor:pointer; flex-shrink:0; user-select:none; min-height:30px;
-    border-bottom:1px solid rgba(255,255,255,0.08);
-}
-#text-overlay.collapsed #text-overlay-bar{display:none;}
-#text-overlay-bar span{font-size:11px; color:var(--accent); flex:1;}
-#text-overlay-bar .ov-mode{font-size:10px; padding:1px 6px; border-radius:8px; background:var(--accent2); color:var(--text2);}
-#text-overlay-bar .ov-mode.auto{background:var(--accent3);color:#5f5;}
-#text-overlay-bar button{background:none;border:none;color:var(--text);cursor:pointer;font-size:14px;padding:1px 5px;}
-#text-overlay-content{
-    flex:1; overflow-y:auto; padding:6px 10px;
-    font-family:'Courier New',monospace; font-size:13px; color:#fff;
-    white-space:pre-wrap; word-break:break-word;
-    max-height:calc(45vh - 32px);
-}
+#text-overlay.collapsed #text-overlay-bar,
 #text-overlay.collapsed #text-overlay-content{display:none;}
-#text-overlay-content .clickable-word{cursor:pointer;border-bottom:1px dotted var(--accent);}
-#text-overlay-content .clickable-word:hover{color:var(--accent);}
-@media (max-width:599px){
-    #text-overlay:not(.collapsed){left:4%;right:4%;max-height:35vh;}
-    #text-overlay-content{max-height:calc(35vh - 32px); font-size:11px;}
-}
-#drop-overlay{
-    display:none; position:absolute; inset:0;
-    background:rgba(233,69,96,0.15); border:3px dashed var(--accent);
-    z-index:10; justify-content:center; align-items:center;
-    font-size:24px; pointer-events:none;
-}
-#game-wrap.drag-hover #drop-overlay{display:flex;}
-/* ===== VIRTUAL GAMEPAD ===== */
-#vgamepad{display:none;position:absolute;inset:0;z-index:4;pointer-events:none;}
-#vgamepad.on{display:block;}
-/* D-Pad container — bottom-left area */
-#vg-dpad{position:absolute;bottom:10%;left:8%;width:min(140px,25vw);height:min(140px,25vw);pointer-events:auto;}
-#vg-dpad button{position:absolute;background:rgba(255,255,255,0.12);border:1px solid rgba(255,255,255,0.2);
-    color:rgba(255,255,255,0.55);touch-action:none;user-select:none;-webkit-user-select:none;
-    cursor:pointer;font-size:min(14px,3vw);display:flex;align-items:center;justify-content:center;}
-#vg-dpad button:active{background:rgba(255,255,255,0.35);}
-#vg-up{top:0;left:33%;width:34%;height:40%;border-radius:40% 40% 0 0;}
-#vg-down{bottom:0;left:33%;width:34%;height:40%;border-radius:0 0 40% 40%;}
-#vg-left{top:30%;left:0;width:33%;height:40%;border-radius:40% 0 0 40%;}
-#vg-right{top:30%;right:0;width:33%;height:40%;border-radius:0 40% 40% 0;}
-/* Action buttons — bottom-right area */
-#vg-actions{position:absolute;bottom:10%;right:6%;pointer-events:auto;display:flex;flex-wrap:wrap;gap:8px;
-    width:min(120px,22vw);justify-content:center;}
-#vg-actions button{width:min(50px,10vw);height:min(50px,10vw);border-radius:50%;
-    background:rgba(255,255,255,0.12);border:1px solid rgba(255,255,255,0.2);
-    color:rgba(255,255,255,0.6);font-size:min(16px,3.5vw);font-weight:bold;
-    touch-action:none;user-select:none;-webkit-user-select:none;cursor:pointer;}
-#vg-actions button:active{background:rgba(255,255,255,0.35);}
-#vg-a{background:rgba(60,200,60,0.22)!important;border-color:rgba(80,220,80,0.5)!important;color:#8f8!important;}
-#vg-b{background:rgba(220,60,60,0.22)!important;border-color:rgba(240,80,80,0.5)!important;color:#f88!important;}
-/* Landscape: D-pad left, actions right, centered vertically */
-@media (orientation:landscape){
-    #vg-dpad{bottom:50%;transform:translateY(50%);left:4%;width:min(120px,18vh);height:min(120px,18vh);}
-    #vg-actions{bottom:50%;transform:translateY(50%);right:4%;}
-}
-/* Desktop: smaller buttons */
-@media (min-width:1024px){
-    #vg-dpad{width:min(110px,12vw);height:min(110px,12vw);bottom:8%;}
-    #vg-actions button{width:min(42px,5vw);height:min(42px,5vw);gap:6px;}
-}
-/* Phone portrait: largest touch targets */
-@media (max-width:599px) and (orientation:portrait){
-    #vg-dpad{width:min(160px,38vw);height:min(160px,38vw);bottom:12%;left:6%;}
-    #vg-actions button{width:min(56px,14vw);height:min(56px,14vw);}
-}
 
-/* ===== SIDE PANEL ===== */
-#side-panel{
-    width:var(--sidebar-w); background:var(--panel);
-    border-left:1px solid var(--border);
-    display:flex; flex-direction:column; gap:6px;
-    padding:8px; overflow-y:auto;
-    flex-shrink:0;
-    transition:width .25s, padding .25s, opacity .25s, min-width .25s;
-    transition:width .25s, padding .25s, opacity .25s;
-}
-#side-panel.collapsed{
-    display:none!important;
-}
-#side-panel h3{
-    font-size:13px; color:var(--accent);
-    border-bottom:1px solid var(--border);
-    padding-bottom:3px; margin-bottom:0;
-    display:flex; align-items:center; gap:6px;
-    flex-shrink:0;
-}
-#side-panel h3 .mode-badge{
-    font-size:10px; padding:1px 6px; border-radius:8px;
-    background:var(--accent2); color:var(--text2);
-    font-weight:normal;
-}
-#side-panel h3 .mode-badge.auto{background:var(--accent3);color:#5f5;}
-#text-output{
-    flex:1; min-height:120px; max-height:50vh;
-    background:#0a0a1a; color:#fff;
-    font-family:'Courier New',monospace; font-size:12px;
-    padding:8px; border-radius:6px; border:1px solid var(--border);
-    overflow-y:auto; white-space:pre-wrap; word-break:break-word;
-}
-.save-entry{
-    display:flex; align-items:center; gap:6px;
-    padding:5px 8px; background:var(--accent2);
-    border-radius:4px; font-size:12px;
-}
-.save-entry span{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-.save-entry button{
-    padding:2px 8px; font-size:11px;
-    background:var(--accent); color:#fff;
-    border:none; border-radius:3px; cursor:pointer;
-    transition:opacity .15s;
-}
-.save-entry button:hover{opacity:0.8;}
-.save-entry button.btn-del{background:#633;}
-.save-entry button.btn-dl{background:#366;}
-.info-row{font-size:11px;color:var(--text2);display:flex;justify-content:space-between;padding:1px 0;}
+/* ---- Panels ---- */
+.panel{background:var(--card);padding:14px;border-radius:6px;border:1px solid var(--border);}
+.panel h3,.panel h4{margin:0 0 8px;font-size:13px;color:#aaa;text-transform:uppercase;letter-spacing:.5px;}
+#text-output{flex:1;min-height:100px;max-height:50vh;background:var(--bg);color:#fff;
+  font-family:Consolas,Monaco,monospace;font-size:13px;padding:10px;border-radius:4px;
+  border:1px solid var(--border);overflow-y:auto;white-space:pre-wrap;word-break:break-word;}
 
-/* ===== SETTINGS MODAL ===== */
-#settings-overlay{
-    display:none; position:fixed; inset:0;
-    background:rgba(0,0,0,0.7); z-index:200;
-    justify-content:center; align-items:center;
-}
-#settings-overlay.show{display:flex;}
-#settings-modal{
-    background:var(--panel); border:1px solid var(--border);
-    border-radius:10px; padding:20px 24px;
-    min-width:320px; max-width:90vw; max-height:85vh;
-    overflow-y:auto; color:var(--text);
-    box-shadow:0 8px 32px rgba(0,0,0,0.5);
-}
-#settings-modal h2{
-    font-size:18px; margin-bottom:16px;
-    color:var(--accent); border-bottom:1px solid var(--border);
-    padding-bottom:8px;
-}
-#settings-modal .setting-row{
-    display:flex; align-items:center; justify-content:space-between;
-    padding:8px 0; border-bottom:1px solid rgba(255,255,255,0.05);
-    gap:12px; flex-wrap:wrap;
-}
-#settings-modal label{font-size:13px; min-width:80px;}
-#settings-modal select, #settings-modal input[type="range"]{
-    background:var(--bg); color:var(--text); border:1px solid var(--border);
-    border-radius:4px; padding:4px 8px; font-size:13px;
-}
-#settings-modal button{
-    padding:8px 20px; margin-top:12px;
-    background:var(--accent); color:#fff;
-    border:none; border-radius:6px; cursor:pointer; font-size:14px;
-}
-#gamepad-status{font-size:11px; color:var(--text2);}
-#gamepad-status.connected{color:#5f5;}
-#settings-modal .radio-group{display:flex;gap:16px;}
-#settings-modal .radio-group label{display:flex;align-items:center;gap:4px;cursor:pointer;min-width:auto;}
+/* ---- Text Overlay (floating bottom panel) ---- */
+#text-overlay{position:absolute;bottom:8px;left:10%;right:10%;z-index:5;transition:all .25s;display:flex;flex-direction:column;pointer-events:none;}
+#text-overlay:not(.collapsed){background:rgba(0,0,0,var(--ov-opacity,.85));border:1px solid rgba(255,255,255,.15);border-radius:8px;max-height:45vh;pointer-events:auto;}
+#text-overlay.collapsed{left:auto;right:auto;bottom:auto;width:auto;}
+#text-overlay-bar{display:flex;align-items:center;gap:6px;padding:4px 10px;cursor:pointer;flex-shrink:0;user-select:none;min-height:30px;border-bottom:1px solid rgba(255,255,255,.08);}
+#text-overlay-bar span{font-size:11px;color:var(--accent);flex:1;}
+#text-overlay-bar .ov-mode{font-size:10px;padding:1px 8px;border-radius:10px;background:var(--card);color:var(--mute);}
+#text-overlay-bar .ov-mode.auto{background:#065f46;color:#5f5;}
+#text-overlay-bar button{background:none;border:none;color:var(--text);cursor:pointer;font-size:14px;padding:1px 5px;}
+#text-overlay-content{flex:1;overflow-y:auto;padding:6px 10px;font-family:Consolas,Monaco,monospace;font-size:13px;color:#fff;white-space:pre-wrap;word-break:break-word;max-height:calc(45vh - 32px);}
+@media(max-width:599px){#text-overlay:not(.collapsed){left:4%;right:4%;max-height:35vh;}#text-overlay-content{max-height:calc(35vh - 32px);font-size:11px;}}
 
-/* ===== TOAST ===== */
-#toast{
-    position:fixed; bottom:20px; right:20px;
-    background:var(--accent); color:#fff;
-    padding:10px 18px; border-radius:8px; font-size:13px;
-    z-index:999; opacity:0; transition:opacity .3s;
-    pointer-events:none; max-width:90vw;
+/* ---- Settings Panel (fixed overlay) ---- */
+.settings-panel{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:18px;
+  position:fixed;top:calc(var(--header-h) + 8px);right:16px;width:360px;
+  max-height:calc(100vh - var(--header-h) - 32px);overflow-y:auto;z-index:500;
+  box-shadow:0 4px 20px rgba(0,0,0,.5);display:none;}
+.settings-panel.active{display:block;animation:slideIn .3s ease;}
+@keyframes slideIn{from{opacity:0;transform:translateY(-10px)}to{opacity:1;transform:translateY(0)}}
+.setting-group{margin-bottom:18px;padding-bottom:14px;border-bottom:1px solid var(--border);}
+.setting-group:last-child{border-bottom:none;margin-bottom:0;}
+.setting-item{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:10px;}
+.setting-item label{font-size:13px;color:#ccc;flex-shrink:0;min-width:70px;}
+.setting-item select,.setting-item input[type="text"],.setting-item input[type="number"]{
+  background:var(--bg);color:#fff;border:1px solid var(--border);padding:7px 10px;border-radius:4px;flex:1;min-width:0;font-size:13px;
 }
-#toast.show{opacity:1;}
+.setting-item select:focus,.setting-item input:focus{outline:none;border-color:var(--accent);}
+.radio-group{display:flex;gap:14px;flex-wrap:wrap;}
+.radio-group label{display:flex;align-items:center;gap:5px;cursor:pointer;font-size:13px;min-width:auto;}
+.controls-row{display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap;}
+.anki-status{display:flex;align-items:center;gap:6px;font-size:11px;padding:4px 8px;background:rgba(0,0,0,.2);border-radius:4px;}
+.anki-dot{width:7px;height:7px;border-radius:50%;background:var(--mute);}
+.anki-dot.connected{background:var(--green);animation:pulse 2s infinite;}
 
-/* ===== HOME VIEW (GAME LIBRARY) ===== */
-#home-view{display:flex;flex-direction:column;height:100vh;overflow:hidden;}
-#home-view.hidden{display:none;}
-#home-toolbar{display:flex;align-items:center;gap:8px;padding:10px 16px;background:var(--panel);border-bottom:1px solid var(--border);flex-shrink:0;flex-wrap:wrap;}
-#home-toolbar h2{font-size:16px;color:var(--accent);margin-right:auto;}
-#home-toolbar button{padding:6px 14px;background:var(--accent2);color:var(--text);border:1px solid var(--border);border-radius:6px;cursor:pointer;font-size:13px;}
-#home-toolbar button:hover{background:var(--accent);}
-#home-toolbar button.active{background:var(--accent);border-color:var(--accent);}
-#library-container{flex:1;overflow-y:auto;padding:16px;display:grid;gap:14px;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));align-content:start;}
+/* ---- Library Cards ---- */
+#library-container{flex:1;overflow-y:auto;padding:16px;display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));align-content:start;}
 #library-container.list-mode{display:flex;flex-direction:column;gap:8px;}
 #library-container.list-mode .game-card{display:flex;flex-direction:row;align-items:center;gap:14px;padding:10px 14px;}
 #library-container.list-mode .game-card .card-thumb{width:80px;height:48px;flex-shrink:0;}
 #library-container.list-mode .game-card .card-info{flex:1;display:flex;align-items:center;gap:16px;}
-#library-container.list-mode .game-card .card-info .card-meta{display:flex;gap:16px;font-size:12px;color:var(--text2);}
+#library-container.list-mode .game-card .card-info .card-meta{display:flex;gap:16px;font-size:12px;color:var(--mute);}
 #library-container.list-mode .game-card .card-actions{flex-shrink:0;}
-.game-card{background:var(--panel);border:1px solid var(--border);border-radius:8px;overflow:hidden;cursor:pointer;transition:border-color .15s,transform .1s;display:flex;flex-direction:column;}
-.game-card:hover{border-color:var(--accent);transform:translateY(-2px);}
+.game-card{background:var(--panel);border:1px solid var(--border);border-radius:6px;overflow:hidden;cursor:pointer;transition:border-color .15s,transform .1s;display:flex;flex-direction:column;}
+.game-card:hover{border-color:var(--accent);transform:translateY(-2px);box-shadow:0 4px 16px rgba(0,0,0,.3);}
 .game-card .card-thumb{width:100%;height:130px;background:var(--bg);display:flex;align-items:center;justify-content:center;overflow:hidden;position:relative;}
 .game-card .card-thumb img{width:100%;height:100%;object-fit:cover;}
-.game-card .card-thumb .no-thumb{font-size:48px;opacity:0.3;}
+.game-card .card-thumb .no-thumb{font-size:44px;opacity:.25;}
 .game-card .card-info{padding:10px 12px;flex:1;}
-.game-card .card-info .card-name{font-size:14px;font-weight:bold;margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.game-card .card-info .card-meta{font-size:11px;color:var(--text2);line-height:1.5;}
+.game-card .card-info .card-name{font-size:14px;font-weight:700;margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.game-card .card-info .card-meta{font-size:11px;color:var(--mute);line-height:1.5;}
 .game-card .card-actions{display:flex;gap:4px;padding:0 12px 10px;}
-.game-card .card-actions button{flex:1;padding:5px 0;font-size:11px;border:1px solid var(--border);border-radius:4px;cursor:pointer;background:var(--accent2);color:var(--text);}
-.game-card .card-actions button:hover{background:var(--accent);}
-.game-card .card-actions button.btn-del{background:#522;}
+.game-card .card-actions button{flex:1;padding:5px 0;font-size:11px;border-radius:4px;cursor:pointer;background:var(--card);color:var(--text);border:1px solid var(--border);}
+.game-card .card-actions button:hover{background:var(--accent);color:#fff;}
+.game-card .card-actions button.btn-del{background:#522;color:#fbb;}
 .game-card .card-actions button.btn-del:hover{background:#833;}
-#empty-library{text-align:center;color:var(--text2);padding:60px 20px;grid-column:1/-1;}
-#empty-library .empty-icon{font-size:64px;margin-bottom:16px;opacity:0.4;}
+#empty-library{text-align:center;color:var(--mute);padding:80px 20px;grid-column:1/-1;}
+#empty-library .empty-icon{font-size:64px;margin-bottom:16px;opacity:.3;}
 #empty-library p{font-size:14px;margin-bottom:8px;}
 
-/* ===== VOCAB PANEL ===== */
-#vocab-panel h4{font-size:12px;color:var(--accent);margin:0 0 4px;}
-#vocab-panel .vocab-toolbar{display:flex;gap:4px;margin-bottom:6px;}
-#vocab-panel .vocab-toolbar button{flex:1;padding:3px 6px;font-size:10px;background:var(--accent2);color:var(--text);border:1px solid var(--border);border-radius:3px;cursor:pointer;}
-#vocab-list{max-height:180px;overflow-y:auto;font-size:11px;}
-.vocab-item{display:flex;align-items:center;gap:4px;padding:3px 4px;border-bottom:1px solid rgba(255,255,255,0.04);}
-.vocab-item .v-word{color:#ff9;cursor:pointer;font-weight:bold;min-width:60px;}
-.vocab-item .v-trans{color:var(--text2);flex:1;font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+/* ---- Dynamic Content ---- */
+.save-entry{display:flex;align-items:center;gap:6px;padding:5px 8px;background:var(--card);border-radius:4px;font-size:12px;margin-bottom:2px;}
+.save-entry span{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.save-entry button{padding:3px 8px;font-size:11px;border:none;border-radius:3px;cursor:pointer;transition:opacity .15s;color:#fff;min-height:unset;}
+.save-entry button:hover{opacity:.8;}
+.save-entry button.btn-del{background:#633;color:#fbb;}
+.save-entry button.btn-dl{background:#065f46;color:#bfb;}
+.vocab-item{display:flex;align-items:center;gap:4px;padding:4px 6px;border-bottom:1px solid rgba(255,255,255,.04);}
+.vocab-item .v-word{color:#ff9;cursor:pointer;font-weight:700;min-width:60px;transition:color .15s;}
+.vocab-item .v-word:hover{color:#fc3;}
+.vocab-item .v-trans{color:var(--mute);flex:1;font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;}
+.vocab-item .v-trans:hover{color:var(--accent);}
 .vocab-item .v-del{color:#f66;cursor:pointer;font-size:10px;padding:0 4px;}
-#text-output .clickable-word{cursor:pointer;border-bottom:1px dotted var(--accent);transition:color .15s;}
-#text-output .clickable-word:hover{color:var(--accent);}
-#translate-box{display:flex;gap:4px;margin:4px 0;}
-#translate-box input{flex:1;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:3px;padding:3px 6px;font-size:11px;}
-#translate-box button{padding:3px 8px;font-size:10px;background:var(--accent2);color:var(--text);border:1px solid var(--border);border-radius:3px;cursor:pointer;}
+.clickable-word{cursor:pointer;border-bottom:1px dotted var(--accent);transition:color .15s;}
+.clickable-word:hover{color:var(--accent);}
+.info-row{font-size:11px;color:var(--mute);display:flex;justify-content:space-between;padding:1px 0;}
+.setting-row{display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.04);gap:12px;flex-wrap:wrap;}
+.mode-badge,.ov-mode{font-size:10px;padding:1px 8px;border-radius:10px;}
+.mode-badge.auto,.ov-mode.auto{background:#065f46;color:#5f5;}
 
-/* ===== LOADING OVERLAY ===== */
-#loading-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:300;
-    flex-direction:column;align-items:center;justify-content:center;gap:16px;}
+/* ---- Misc ---- */
+#toolbar{display:none;}
+#toolbar.fs-hidden{display:none;}
+#home-toolbar button.active{background:var(--accent) !important;border-color:var(--accent) !important;color:#fff !important;}
+#toolbar input[type="file"]{display:none;}
+#vgamepad{display:none;position:absolute;inset:0;z-index:4;pointer-events:none;}
+#vgamepad.on{display:block;}
+#drop-overlay{display:none;position:absolute;inset:0;background:rgba(14,99,156,.15);border:3px dashed var(--accent);z-index:10;justify-content:center;align-items:center;font-size:24px;pointer-events:none;}
+#game-wrap.drag-hover #drop-overlay{display:flex;}
+#loading-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:300;flex-direction:column;align-items:center;justify-content:center;gap:14px;}
 #loading-overlay.show{display:flex;}
-#loading-spinner{width:48px;height:48px;border:4px solid rgba(255,255,255,0.15);
-    border-top:4px solid var(--accent);border-radius:50%;animation:spin .8s linear infinite;}
-@keyframes spin{to{transform:rotate(360deg);}}
-#loading-text{color:var(--text);font-size:15px;font-weight:bold;}
-#loading-sub{color:var(--text2);font-size:12px;}
-#loading-bar-wrap{width:280px;height:6px;background:#222;border-radius:3px;overflow:hidden;}
+#loading-spinner{width:44px;height:44px;border:3px solid rgba(255,255,255,.1);border-top:3px solid var(--accent);border-radius:50%;animation:spin .8s linear infinite;}
+@keyframes spin{to{transform:rotate(360deg)}}
+#loading-text{color:var(--text);font-size:15px;font-weight:700;}
+#loading-sub{color:var(--mute);font-size:12px;}
+#loading-bar-wrap{width:260px;height:5px;background:#222;border-radius:3px;overflow:hidden;}
 #loading-bar{height:100%;width:0%;background:var(--accent);transition:width .15s linear;border-radius:3px;}
+#settings-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:200;justify-content:center;align-items:center;}
+#settings-overlay.show{display:flex;}
+#settings-modal{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:20px 24px;min-width:320px;max-width:90vw;max-height:85vh;overflow-y:auto;color:var(--text);box-shadow:0 8px 32px rgba(0,0,0,.5);}
+#toast{position:fixed;bottom:20px;right:20px;background:var(--accent);color:#fff;padding:10px 18px;border-radius:6px;font-size:13px;z-index:999;opacity:0;transition:opacity .3s;pointer-events:none;max-width:90vw;}
+#toast.show{opacity:1;}
+#gamepad-status{font-size:11px;color:var(--mute);}
+#gamepad-status.connected{color:#5f5;}
+#progress-wrap{width:120px;height:4px;background:#333;border-radius:2px;overflow:hidden;flex-shrink:0;}
+#progress-bar{height:100%;width:0%;background:var(--accent);transition:width .1s linear;border-radius:2px;}
+#status{font-size:11px;color:var(--mute);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 
-/* ===== GAME VIEW WRAPPER ===== */
-#game-view{display:flex;flex-direction:column;height:100vh;overflow:hidden;}
-#game-view.hidden{display:none;}
+/* ---- Virtual Gamepad ---- */
+#vg-dpad{position:absolute;pointer-events:auto;}
+#vg-dpad button{position:absolute;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.15);color:rgba(255,255,255,.5);touch-action:none;user-select:none;-webkit-user-select:none;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background .1s;}
+#vg-dpad button:active{background:rgba(255,255,255,.28);}
+#vg-up{top:0;left:33%;width:34%;height:40%;border-radius:40% 40% 0 0;}
+#vg-down{bottom:0;left:33%;width:34%;height:40%;border-radius:0 0 40% 40%;}
+#vg-left{top:30%;left:0;width:33%;height:40%;border-radius:40% 0 0 40%;}
+#vg-right{top:30%;right:0;width:33%;height:40%;border-radius:0 40% 40% 0;}
+#vg-actions{position:absolute;pointer-events:auto;display:flex;flex-wrap:wrap;gap:6px;justify-content:center;}
+#vg-actions button{border-radius:50%;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.15);color:rgba(255,255,255,.55);font-weight:700;touch-action:none;user-select:none;-webkit-user-select:none;cursor:pointer;transition:background .1s;display:flex;align-items:center;justify-content:center;}
+#vg-actions button:active{background:rgba(255,255,255,.28);}
+#vg-a{background:rgba(76,175,80,.22)!important;border-color:rgba(76,175,80,.5)!important;color:#6f6!important;}
+#vg-b{background:rgba(244,67,54,.22)!important;border-color:rgba(244,67,54,.5)!important;color:#f66!important;}
+@media(orientation:portrait){
+  #vg-dpad{bottom:8%;left:5%;width:min(150px,38vw);height:min(150px,38vw);}
+  #vg-dpad button{font-size:min(18px,4vw);}
+  #vg-actions{bottom:10%;right:5%;width:min(130px,32vw);height:min(130px,32vw);}
+  #vg-actions button{width:min(52px,14vw);height:min(52px,14vw);font-size:min(16px,3.8vw);}
+}
+@media(orientation:landscape){
+  #vg-dpad{bottom:16%;left:3%;width:min(120px,20vh);height:min(120px,20vh);transform:none;}
+  #vg-dpad button{font-size:min(14px,2.2vh);}
+  #vg-actions{bottom:18%;right:3%;width:min(110px,18vh);height:min(110px,18vh);transform:none;}
+  #vg-actions button{width:min(45px,8vh);height:min(45px,8vh);font-size:min(14px,2.5vh);}
+}
+@media(min-width:1024px){
+  #vg-dpad{width:min(105px,10vw);height:min(105px,10vw);bottom:8%;left:6%;}
+  #vg-actions button{width:min(40px,4vw);height:min(40px,4vw);}
+}
+@media(max-width:599px)and(orientation:portrait){
+  #vg-dpad{width:min(165px,42vw);height:min(165px,42vw);bottom:10%;left:5%;}
+  #vg-actions{width:min(145px,36vw);height:min(145px,36vw);bottom:12%;right:5%;}
+  #vg-actions button{width:min(58px,15vw);height:min(58px,15vw);}
+}
 
-/* ===== RESPONSIVE ===== */
-@media (max-width:1023px){
-    #main{flex-direction:column;}
-    #game-wrap{min-height:0; flex:1;}
-    #side-panel{width:100%; max-height:40vh; border-left:none; border-top:1px solid var(--border);}
-    :root{--sidebar-w:100%;}
-    #toolbar{font-size:11px; gap:4px; padding:6px 8px;}
-    #toolbar button, #toolbar label.btn{font-size:11px; padding:5px 8px;}
-    #status{font-size:10px; min-width:60px;}
+/* ---- Scrollbar ---- */
+::-webkit-scrollbar{width:7px;height:7px;}
+::-webkit-scrollbar-track{background:rgba(0,0,0,.1);border-radius:3px;}
+::-webkit-scrollbar-thumb{background:rgba(255,255,255,.15);border-radius:3px;}
+::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,.25);}
+
+/* ---- Touch optimization ---- */
+@media(hover:none)and(pointer:coarse){
+  button,.btn{min-height:44px;padding:12px 16px;}
+  .floating-btn{width:52px;height:52px;}
 }
-@media (max-width:599px){
-    #toolbar{justify-content:center;}
-    #toolbar .btn-text{display:none;}
-    #toolbar .game-upload-only{display:none;}
-    #status{display:none;}
-    #progress-wrap{display:none;}
-    #game-wrap{min-height:0; flex:1;}
-    #side-panel{max-height:50vh;}
-    #game-iframe{max-width:100vw!important;max-height:100vh!important;}
-}
+
+/* ---- Toggle Switch ---- */
+.toggle-switch{position:relative;display:inline-block;width:44px;height:24px;flex-shrink:0;}
+.toggle-switch input{opacity:0;width:0;height:0;}
+.toggle-slider{position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;background:#555;transition:.3s;border-radius:24px;}
+.toggle-slider:before{content:"";position:absolute;height:18px;width:18px;left:3px;bottom:3px;background:#fff;transition:.3s;border-radius:50%;}
+.toggle-switch input:checked+.toggle-slider{background:var(--accent);}
+.toggle-switch input:checked+.toggle-slider:before{transform:translateX(20px);}
+
+/* Range slider for opacity */
+input[type=range].opacity-slider{-webkit-appearance:none;width:100%;height:6px;background:var(--border);border-radius:3px;outline:none;}
+input[type=range].opacity-slider::-webkit-slider-thumb{-webkit-appearance:none;width:20px;height:20px;background:var(--accent);border-radius:50%;cursor:pointer;}
 </style>
 </head>
 <body>
 
+<!-- ===== HEADER — compact icon-only bar ===== -->
+<header id="home-toolbar">
+  <h3><span>🎮</span></h3>
+
+  <!-- Hidden file inputs (required by module script) -->
+  <input type="file" id="upload-zip-home" accept=".zip" style="position:absolute;left:-9999px;">
+  <label class="btn secondary game-upload-only" title="加载游戏 Zip" style="display:none;position:absolute;left:-9999px;">
+    <input type="file" id="upload-zip" accept=".zip">
+  </label>
+
+  <!-- Game icon buttons (shown during game) -->
+  <button id="btn-extract" class="icon-btn secondary game-upload-only" title="提取文本" style="display:none;">📝</button>
+  <button id="btn-reload" class="icon-btn secondary game-upload-only" title="重启游戏" style="display:none;">🔄</button>
+  <button id="btn-screenshot" class="icon-btn secondary game-upload-only" title="截图" style="display:none;">📸</button>
+
+  <div class="sep game-upload-only" style="display:none;"></div>
+  <span id="status" style="display:none;"></span>
+  <div id="progress-wrap" class="game-upload-only" style="display:none;width:60px;height:3px;"><div id="progress-bar"></div></div>
+
+  <div style="flex:1;"></div>
+
+  <!-- Right icon buttons -->
+  <div class="actions">
+    <!-- Library: add game + view toggles -->
+    <button id="btn-add-game" class="icon-btn" title="添加游戏" style="background:var(--accent);color:#fff;">＋</button>
+    <button id="btn-view-grid" class="active icon-btn secondary" title="九宫格视图">▦</button>
+    <button id="btn-view-list" class="icon-btn secondary" title="列表视图">☰</button>
+
+    <!-- Game: action buttons -->
+    <button class="icon-btn game-upload-only" id="btn-settings" title="设置面板" style="display:none;">⚙</button>
+    <button class="icon-btn game-upload-only" id="btn-fullscreen" title="全屏" style="display:none;">⛶</button>
+    <button class="icon-btn game-upload-only" id="btn-back-home" title="返回游戏库" style="display:none;">🏠</button>
+  </div>
+</header>
+
+<!-- ===== SETTINGS OVERLAY (full-screen modal, matches module script) ===== -->
+<div id="settings-overlay">
+  <div id="settings-modal" class="settings-panel">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+    <h3 style="margin:0;font-size:15px;">⚙ 设置</h3>
+    <button class="icon-btn" id="btn-settings-close" style="font-size:18px;">✕</button>
+  </div>
+  <div class="setting-group">
+    <h4>📐 游戏设置</h4>
+    <div class="setting-item"><label>提取模式</label><div class="radio-group"><label><input type="radio" name="extractMode" value="manual" checked> 手动</label><label><input type="radio" name="extractMode" value="auto"> 自动</label></div></div>
+    <div class="setting-item"><label>对话历史</label><div class="radio-group"><label><input type="radio" name="historyMode" value="off" checked> 关闭</label><label><input type="radio" name="historyMode" value="on"> 开启</label></div></div>
+    <div class="setting-item"><label>TTS 模式</label><div class="radio-group"><label><input type="radio" name="ttsMode" value="off" checked> 关闭</label><label><input type="radio" name="ttsMode" value="manual"> 手动</label><label><input type="radio" name="ttsMode" value="auto"> 自动</label></div></div>
+    <div class="setting-item"><label>TTS 发音人</label><div style="display:flex;gap:6px;flex:1;"><select id="sel-tts-voice" style="flex:1;"><option value="">加载中…</option></select><button id="btn-tts-test" class="secondary" style="font-size:12px;white-space:nowrap;">🔊 测试</button></div></div>
+    <div class="setting-item"><label>UI 缩放</label><select id="sel-ui-scale"><option value="0.8">80%</option><option value="1.0" selected>100%</option><option value="1.2">120%</option></select></div>
+  </div>
+  <div class="setting-group">
+    <h4>🎮 游戏手柄</h4>
+    <div class="setting-item"><label>手柄状态</label><span id="gamepad-status">未检测到</span></div>
+    <div class="setting-item"><label>手柄隔离</label><select id="sel-gpad-isolate"><option value="on" selected>开启</option><option value="off">关闭</option></select></div>
+    <div style="font-size:11px;color:var(--mute);">按键: A=确认 B=取消 X/Y=切页 · 方向键=导航 · Select(8)=菜单</div>
+  </div>
+  <div class="setting-group">
+    <h4>📚 Anki 连接</h4>
+    <div style="font-size:11px;color:var(--mute);margin-bottom:8px;">需运行 Anki + AnkiConnect 插件</div>
+    <div class="setting-item"><label>URL</label><input id="input-anki-url" value="http://127.0.0.1:8765"></div>
+    <div class="setting-item"><label>牌组</label><input id="input-anki-deck" value="RPG Vocab"></div>
+    <div class="setting-item"><label>卡片类型</label><input id="input-anki-model" value="Basic"></div>
+    <div class="controls-row"><button id="btn-anki-test" class="secondary">🔗 测试连接</button><button id="btn-anki-send" class="secondary">📤 发送生词本</button><span id="anki-status" style="font-size:11px;color:var(--mute);"></span></div>
+  </div>
+  <div class="setting-group">
+    <h4>📖 Yomitan词典</h4>
+    <div style="font-size:11px;color:var(--mute);margin-bottom:6px;">导入Yomitan .zip词典</div>
+    <div class="controls-row"><input type="file" id="upload-yomitan" accept=".zip" style="display:none;"><button id="btn-yomitan-load" class="secondary">📥 导入词典</button><span id="yomitan-status" style="font-size:11px;color:var(--mute);">未加载</span></div>
+  </div>
+  </div>
+</div>
+
 <!-- ===== HOME VIEW (GAME LIBRARY) ===== -->
 <div id="home-view">
-    <div id="home-toolbar">
-        <h2>🎮 游戏库</h2>
-        <button id="btn-view-grid" class="active" title="九宫格视图">▦ 九宫格</button>
-        <button id="btn-view-list" title="列表视图">☰ 列表</button>
-        <button id="btn-add-game" style="display:inline-flex;align-items:center;gap:4px;padding:6px 14px;background:var(--accent);color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px;">＋ 添加游戏</button>
-        <input type="file" id="upload-zip-home" accept=".zip" style="position:absolute;left:-9999px;">
+  <div id="home-progress-wrap" style="display:none;height:4px;background:#333;margin:0 16px;border-radius:2px;overflow:hidden;">
+    <div id="home-progress-bar" style="height:100%;width:0%;background:var(--accent);transition:width .1s linear;border-radius:2px;"></div>
+  </div>
+  <div id="home-progress-text" style="display:none;font-size:11px;color:var(--mute);padding:4px 16px;"></div>
+
+  <div id="library-container">
+    <div id="empty-library">
+      <div class="empty-icon">📦</div>
+      <p>欢迎使用 RPGMZ Player Pro</p>
+      <p style="font-size:12px;">点击「＋ 添加游戏」或拖放 .zip 文件到此处</p>
     </div>
-    <div id="home-progress-wrap" style="display:none;height:5px;background:#222;margin:0 16px;border-radius:3px;overflow:hidden;">
-        <div id="home-progress-bar" style="height:100%;width:0%;background:var(--accent);transition:width .1s linear;border-radius:3px;"></div>
-    </div>
-    <div id="home-progress-text" style="display:none;font-size:11px;color:var(--text2);padding:4px 16px;"></div>
-    <div id="library-container">
-        <div id="empty-library">
-            <div class="empty-icon">📦</div>
-            <p>游戏库为空</p>
-            <p style="font-size:12px;">点击「＋ 添加游戏」或拖放 .zip 文件到此处</p>
-        </div>
-    </div>
-    <!-- Loading overlay -->
-    <div id="loading-overlay">
-        <div id="loading-spinner"></div>
-        <div id="loading-text">正在启动游戏…</div>
-        <div id="loading-sub"></div>
-        <div id="loading-bar-wrap"><div id="loading-bar"></div></div>
-    </div>
-</div>
+  </div>
+
+  <div id="loading-overlay">
+    <div id="loading-spinner"></div>
+    <div id="loading-text">正在启动游戏…</div>
+    <div id="loading-sub"></div>
+    <div id="loading-bar-wrap"><div id="loading-bar"></div></div>
+  </div>
+</div><!-- /#home-view -->
 
 <!-- ===== GAME VIEW ===== -->
 <div id="game-view" class="hidden">
+  <div class="container" id="main">
 
-<!-- ===== TOOLBAR ===== -->
-<div id="toolbar">
-    <label class="btn game-upload-only" title="加载游戏 Zip"><span>📦</span> <span class="btn-text">加载游戏</span>
-        <input type="file" id="upload-zip" accept=".zip">
-    </label>
-    <button id="btn-extract" title="提取当前文本">📝 <span class="btn-text">提取文本</span></button>
-    <button id="btn-reload" title="重启游戏">🔄 <span class="btn-text">重启</span></button>
-    <button id="btn-screenshot" title="截图">📸 <span class="btn-text">截图</span></button>
-    <button id="btn-settings" title="设置">⚙</button>
-    <button id="btn-fullscreen" title="全屏">⛶</button>
-    <button id="btn-back-home" title="返回游戏库">🏠</button>
-    <span id="status">就绪 — 请加载游戏 Zip</span>
-    <div id="progress-wrap"><div id="progress-bar"></div></div>
-</div>
+    <!-- Left floating toggle -->
+    <div class="floating-btn left game-upload-only" id="left-sidebar-toggle" style="display:none;" title="对话面板"><span>▶</span></div>
 
-<!-- ===== MAIN ===== -->
-<div id="main">
-    <div id="game-wrap">
-        <iframe id="game-iframe" sandbox="allow-scripts allow-same-origin"
-                allow="autoplay; fullscreen; gamepad"></iframe>
-        <div id="text-overlay" class="collapsed">
-            <button id="btn-ov-expand" title="展开文本">📝</button>
-            <div id="text-overlay-bar">
-                <span>📝 剧情文本</span>
-                <span class="ov-mode" id="ov-mode-badge">手动</span>
-                <button id="btn-ov-toggle" title="收起">✕</button>
-            </div>
-            <div id="text-overlay-content"></div>
+    <!-- Right floating toggle -->
+    <div class="floating-btn right game-upload-only" id="right-sidebar-toggle" style="display:none;" title="设置面板"><span>▶</span></div>
+
+    <!-- Text overlay expand button (top-left) -->
+    <button id="btn-ov-expand" title="展开文本">📝</button>
+
+    <div class="game-area" id="game-wrap">
+      <div id="game-placeholder">
+        <div style="font-size:64px;">🎮</div>
+        <h3 style="color:#888;margin:0;">欢迎使用 RPGMZ Player Pro</h3>
+        <p style="color:#666;font-size:14px;">请点击上方的 "上传游戏ZIP" 选择游戏文件</p>
+      </div>
+      <iframe id="game-iframe" sandbox="allow-scripts allow-same-origin"
+              allow="autoplay; fullscreen; gamepad" style="display:none;"></iframe>
+
+      <!-- Text Overlay -->
+      <div id="text-overlay" class="collapsed">
+        <div id="text-overlay-bar">
+          <span>📝 剧情文本</span>
+          <span class="ov-mode" id="ov-mode-badge">手动</span>
+          <button id="btn-ov-toggle" title="收起">✕</button>
         </div>
-        <div id="vgamepad">
-            <div id="vg-dpad">
-                <button id="vg-up">▲</button>
-                <button id="vg-down">▼</button>
-                <button id="vg-left">◀</button>
-                <button id="vg-right">▶</button>
-            </div>
-            <div id="vg-actions">
-                <button id="vg-y">Y</button>
-                <button id="vg-x">X</button>
-                <button id="vg-b">B</button>
-                <button id="vg-a">A</button>
-            </div>
+        <div id="text-overlay-content"></div>
+      </div>
+
+      <!-- Virtual Gamepad -->
+      <div id="vgamepad">
+        <div id="vg-dpad">
+          <button id="vg-up">▲</button><button id="vg-down">▼</button>
+          <button id="vg-left">◀</button><button id="vg-right">▶</button>
         </div>
-        <div id="drop-overlay">📥 拖放 .zip 或 .rmmzsave 到这里</div>
+        <div id="vg-actions">
+          <button id="vg-y">Y</button><button id="vg-x">X</button>
+          <button id="vg-b">B</button><button id="vg-a">A</button>
+        </div>
+      </div>
+
+      <!-- Drop overlay -->
+      <div id="drop-overlay">📥 拖放 .zip 或 .rmmzsave 到这里</div>
     </div>
 
-    <div id="side-panel">
-        <h3>⚙ 设置</h3>
-        <label class="btn" style="display:block;text-align:center;padding:5px;margin-bottom:4px;background:var(--accent2);color:var(--text);border:1px solid var(--border);border-radius:4px;cursor:pointer;font-size:12px;">
-            📥 导入存档
-            <input type="file" id="upload-save-side" accept=".rmmzsave,.rpgsave" style="display:none;">
-        </label>
-        <div id="save-list">暂无存档</div>
-        <div class="setting-row" style="padding:6px 0;font-size:11px;justify-content:space-between;">
-            <span>虚拟手柄</span>
-            <select id="sel-vgpad" style="background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:3px;padding:2px 4px;font-size:11px;">
-                <option value="off">关闭</option><option value="on">开启</option>
-            </select>
+    <!-- LEFT SIDEBAR: Dialog text, Screenshot, Vocab, Info -->
+    <div class="sidebar sidebar-left" id="sidebar-left">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <h3 style="margin:0;">💬 对话文本</h3>
+        <button class="icon-btn" id="close-left-sidebar" style="font-size:16px;">✕</button>
+      </div>
+
+      <div class="panel">
+        <div class="controls-row" style="align-items:center;">
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;">
+            <span id="mode-badge" style="font-size:10px;padding:2px 8px;border-radius:10px;background:var(--card);">手动</span>
+          </label>
+          <select id="sel-quick-mode" style="background:var(--bg);color:#fff;border:1px solid var(--border);border-radius:3px;padding:3px 6px;font-size:11px;flex:1;">
+            <option value="manual">手动提取</option><option value="auto">自动提取</option>
+          </select>
         </div>
-        <div class="setting-row" style="padding:6px 0;font-size:11px;justify-content:space-between;">
-            <span>提取模式</span>
-            <select id="sel-quick-mode" style="background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:3px;padding:2px 4px;font-size:11px;">
-                <option value="manual">手动</option><option value="auto">自动</option>
-            </select>
-        </div>
-        <div class="setting-row" style="padding:6px 0;font-size:11px;justify-content:space-between;">
-            <span>文本框透明度</span>
-            <select id="sel-ov-opacity" style="background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:3px;padding:2px 4px;font-size:11px;">
-                <option value="0.95">95%</option><option value="0.85" selected>85%</option><option value="0.7">70%</option><option value="0.5">50%</option>
-            </select>
-        </div>
-        <div class="setting-row" style="padding:6px 0;font-size:11px;justify-content:space-between;">
-            <span>TTS模式</span>
-            <select id="sel-quick-tts" style="background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:3px;padding:2px 4px;font-size:11px;">
-                <option value="off">关闭</option><option value="manual">手动</option><option value="auto">自动</option>
-            </select>
-        </div>
-        <h3>📚 生词本</h3>
+        <div id="text-output">（点击"提取文本"或开启自动提取）</div>
+      </div>
+
+      <div class="panel">
+        <h4>📷 截图</h4>
+        <div style="font-size:11px;color:var(--mute);">使用顶部"📸 截图"按钮截取</div>
+      </div>
+
+      <div class="panel">
+        <h4>📚 生词本</h4>
         <div id="vocab-panel">
-            <div class="vocab-toolbar">
-                <button id="btn-vocab-export">📤 导出CSV</button>
-                <button id="btn-vocab-clear">🗑 清空</button>
-            </div>
-            <div id="translate-box">
-                <input id="input-translate" placeholder="输入查词…">
-                <button id="btn-translate">🌐</button>
-            </div>
-            <div id="vocab-list">点击底部文本高亮词添加</div>
+          <div class="vocab-toolbar controls-row">
+            <button id="btn-vocab-export" class="secondary" style="font-size:10px;">📤 导出CSV</button>
+            <button id="btn-vocab-clear" class="secondary" style="font-size:10px;">🗑 清空</button>
+          </div>
+          <div id="translate-box" style="display:flex;gap:4px;margin:4px 0;">
+            <input id="input-translate" placeholder="输入查词…" style="flex:1;background:var(--bg);color:#fff;border:1px solid var(--border);border-radius:3px;padding:3px 6px;font-size:11px;">
+            <button id="btn-translate" class="secondary" style="font-size:10px;padding:4px 8px;">🌐</button>
+          </div>
+          <div id="vocab-list" style="max-height:150px;overflow-y:auto;font-size:11px;">点击底部文本高亮词添加</div>
         </div>
-        <h3>ℹ️ 信息</h3>
+      </div>
+
+      <div id="log-container" style="font-family:Consolas,Monaco,monospace;font-size:11px;color:var(--mute);margin-top:auto;background:var(--bg);padding:8px;border-radius:4px;border:1px solid var(--border);min-height:60px;max-height:150px;overflow-y:auto;white-space:pre-wrap;">
+        📝 日志: 等待游戏加载…
+      </div>
+    </div>
+
+    <!-- RIGHT SIDEBAR: Settings, Saves, Info -->
+    <div class="sidebar sidebar-right" id="side-panel">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <h3 style="margin:0;">⚙ 快速设置 & 存档</h3>
+        <button class="icon-btn" id="btn-sidebar-close" style="font-size:16px;">✕</button>
+      </div>
+
+      <div class="panel">
+        <h4>💾 存档管理</h4>
+        <div class="controls-row">
+          <label class="btn secondary" style="cursor:pointer;flex:1;display:flex;align-items:center;justify-content:center;gap:4px;font-size:12px;">
+            📥 导入存档<input type="file" id="upload-save-side" accept=".rmmzsave,.rpgsave" style="display:none;">
+          </label>
+          <button id="btn-rescan-saves" class="secondary" style="flex:1;font-size:11px;" title="强制游戏重新扫描存档">🔄 重新检测</button>
+        </div>
+        <div id="save-list" style="font-size:12px;color:var(--mute);min-height:36px;">暂无存档</div>
+      </div>
+
+      <div class="panel">
+        <h4>⚙ 快捷设置</h4>
+        <div class="setting-row" style="padding:4px 0;font-size:11px;justify-content:space-between;">
+          <span>虚拟手柄</span>
+          <select id="sel-vgpad" style="background:var(--bg);color:#fff;border:1px solid var(--border);border-radius:3px;padding:3px 6px;font-size:11px;">
+            <option value="off">关闭</option><option value="on">开启</option>
+          </select>
+        </div>
+        <div class="setting-row" style="padding:4px 0;font-size:11px;justify-content:space-between;">
+          <span>TTS模式</span>
+          <select id="sel-quick-tts" style="background:var(--bg);color:#fff;border:1px solid var(--border);border-radius:3px;padding:3px 6px;font-size:11px;">
+            <option value="off">关闭</option><option value="manual">手动</option><option value="auto">自动</option>
+          </select>
+        </div>
+        <div class="setting-row" style="padding:4px 0;font-size:11px;justify-content:space-between;">
+          <span>文本框透明度</span>
+          <select id="sel-ov-opacity" style="background:var(--bg);color:#fff;border:1px solid var(--border);border-radius:3px;padding:3px 6px;font-size:11px;">
+            <option value="0.95">95%</option><option value="0.85" selected>85%</option><option value="0.7">70%</option><option value="0.5">50%</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h4>ℹ️ 游戏信息</h4>
         <div class="info-row"><span>文件数</span><span id="info-files">—</span></div>
         <div class="info-row"><span>GameId</span><span id="info-gameid">—</span></div>
         <div class="info-row"><span>🎮 手柄</span><span id="info-gamepad">未连接</span></div>
+      </div>
     </div>
-</div>
-
-<!-- ===== SETTINGS MODAL ===== -->
-<div id="settings-overlay">
-    <div id="settings-modal">
-        <h2>⚙ 设置</h2>
-        <div class="setting-row">
-            <label>文本提取模式</label>
-            <div class="radio-group">
-                <label><input type="radio" name="extractMode" value="manual" checked> 手动</label>
-                <label><input type="radio" name="extractMode" value="auto"> 自动</label>
-            </div>
-        </div>
-        <div class="setting-row">
-            <label>对话历史</label>
-            <div class="radio-group">
-                <label><input type="radio" name="historyMode" value="off" checked> 关闭</label>
-                <label><input type="radio" name="historyMode" value="on"> 开启</label>
-            </div>
-        </div>
-        <div class="setting-row">
-            <label>TTS 发音人</label>
-            <div style="display:flex;gap:6px;align-items:center;">
-                <select id="sel-tts-voice" style="flex:1;">
-                    <option value="">加载中…</option>
-                </select>
-                <button id="btn-tts-test" style="padding:4px 10px;background:var(--accent2);color:var(--text);border:1px solid var(--border);border-radius:4px;cursor:pointer;font-size:12px;white-space:nowrap;">🔊 测试</button>
-            </div>
-        </div>
-        <div class="setting-row">
-            <label>TTS 模式</label>
-            <div class="radio-group">
-                <label><input type="radio" name="ttsMode" value="off" checked> 关闭</label>
-                <label><input type="radio" name="ttsMode" value="manual"> 手动播放</label>
-                <label><input type="radio" name="ttsMode" value="auto"> 自动朗读</label>
-            </div>
-        </div>
-        <div class="setting-row">
-            <label>UI 缩放</label>
-            <select id="sel-ui-scale">
-                <option value="0.8">80%</option>
-                <option value="1.0" selected>100%</option>
-                <option value="1.2">120%</option>
-            </select>
-        </div>
-        <div class="setting-row">
-            <label>游戏手柄</label>
-            <span id="gamepad-status">未检测到</span>
-        </div>
-        <div class="setting-row" style="font-size:11px;color:var(--text2);">
-            <span>按键映射: A=确认 B=取消 X=Shift Y=菜单<br>
-            LB=上页 RB=下页 方向键=移动<br>
-            Start=全屏 Select=侧边栏</span>
-        </div>
-        <div class="setting-row">
-            <label>📚 Anki 连接</label>
-            <span style="font-size:11px;color:var(--text2);">需运行 Anki + AnkiConnect 插件</span>
-        </div>
-        <div class="setting-row">
-            <label>Anki URL</label>
-            <input id="input-anki-url" value="http://127.0.0.1:8765" style="flex:1;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:3px;padding:3px 6px;font-size:11px;">
-        </div>
-        <div class="setting-row">
-            <label>牌组</label>
-            <input id="input-anki-deck" value="RPG Vocab" style="flex:1;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:3px;padding:3px 6px;font-size:11px;">
-        </div>
-        <div class="setting-row">
-            <label>卡片类型</label>
-            <input id="input-anki-model" value="Basic" style="flex:1;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:3px;padding:3px 6px;font-size:11px;">
-        </div>
-        <div class="setting-row">
-            <button id="btn-anki-test" style="padding:4px 10px;font-size:11px;">🔗 测试连接</button>
-            <button id="btn-anki-send" style="padding:4px 10px;font-size:11px;">📤 发送生词本</button>
-            <span id="anki-status" style="font-size:11px;color:var(--text2);"></span>
-        </div>
-        <div class="setting-row">
-            <label>📖 Yomitan词典</label>
-            <span style="font-size:11px;color:var(--text2);">导入Yomitan .zip词典</span>
-        </div>
-        <div class="setting-row">
-            <input type="file" id="upload-yomitan" accept=".zip" style="display:none;">
-            <button id="btn-yomitan-load" style="padding:4px 10px;font-size:11px;">📥 导入词典</button>
-            <span id="yomitan-status" style="font-size:11px;color:var(--text2);">未加载</span>
-        </div>
-        <button id="btn-settings-close">关闭</button>
-    </div>
-</div>
-
+  </div>
 </div><!-- /#game-view -->
 
-<!-- ===== TOAST (always visible) ===== -->
+<!-- ===== TOAST ===== -->
 <div id="toast"></div>
 
-<!-- ====================================================================== -->
+<!-- ===== HIDDEN TOOLBAR (JS references this, kept for compatibility) ===== -->
+<div id="toolbar" style="display:none;"></div>
 <script type="module">
 console.log('=== rm-wasm-vfs v2.1 ===');
 import { WasmVFS } from './wasm_vfs.js';
@@ -2419,9 +2444,9 @@ function hookUtils(){
     var vfs=getVfs();
     if(vfs&&vfs.encryptionInfo){
         var enc=vfs.encryptionInfo;
-        Utils.setEncryptionInfo(enc.hasImages,enc.hasAudio,enc.key);
+        try{Utils.setEncryptionInfo(enc.hasImages,enc.hasAudio,enc.key);}catch(e){console.warn('[VFS Sandbox] setEncryptionInfo not available, skipping');}
         console.log('[VFS Sandbox] Encryption key injected. hasImages='+enc.hasImages+' hasAudio='+enc.hasAudio);
-    }else{Utils.setEncryptionInfo(false,false,'');}
+    }else{try{Utils.setEncryptionInfo(false,false,'');}catch(e){}}
 }
 setInterval(function(){if(typeof Utils!=='undefined') hookUtils();},50);
 // Anchor tag
@@ -2509,6 +2534,577 @@ window.addEventListener('message',e=>{
 
 // Cleanup
 window.addEventListener('beforeunload',()=>{vfs.shutdown();});
+</script>
+
+<!-- ====================================================================== -->
+<!-- UI INTERACTION SCRIPTS — sidebar toggle, floating buttons, etc.        -->
+<!-- ====================================================================== -->
+<script>
+(function(){
+  const leftToggle = document.getElementById('left-sidebar-toggle');
+  const rightToggle = document.getElementById('right-sidebar-toggle');
+  const leftSidebar = document.getElementById('sidebar-left');
+  const rightSidebar = document.getElementById('side-panel');
+  const closeLeft = document.getElementById('close-left-sidebar');
+  const closeRight = document.getElementById('btn-sidebar-close');
+  const gameArea = document.getElementById('game-wrap');
+  const btnSettings = document.getElementById('btn-settings');
+  const btnOvExpand = document.getElementById('btn-ov-expand');
+  const textOverlay = document.getElementById('text-overlay');
+
+  // Sidebars now OVERLAY on top of game. Just sync floating button icons.
+  function syncFloatingBtns() {
+    try {
+      if (leftToggle && leftSidebar) {
+        var s = leftToggle.querySelector('span');
+        if (s) s.textContent = leftSidebar.classList.contains('active') ? '◀' : '▶';
+      }
+      if (rightToggle && rightSidebar) {
+        var s = rightToggle.querySelector('span');
+        if (s) s.textContent = rightSidebar.classList.contains('collapsed') ? '▶' : '◀';
+      }
+    } catch(e) { /* never crash on UI sync */ }
+  }
+
+  // Left sidebar toggle
+  if (leftToggle && leftSidebar) {
+    leftToggle.addEventListener('click', function() {
+      leftSidebar.classList.toggle('active');
+      leftToggle.querySelector('span').textContent = leftSidebar.classList.contains('active') ? '◀' : '▶';
+      syncFloatingBtns();
+    });
+  }
+  if (closeLeft && leftSidebar) {
+    closeLeft.addEventListener('click', function() {
+      leftSidebar.classList.remove('active');
+      if (leftToggle) leftToggle.querySelector('span').textContent = '▶';
+      syncFloatingBtns();
+    });
+  }
+
+  // Right sidebar: module script's toggleSidebar() handles collapsed.
+  // We just sync the floating button icon and game-area margins.
+  function syncRightSidebarUI() {
+    var collapsed = rightSidebar && rightSidebar.classList.contains('collapsed');
+    if (rightToggle) rightToggle.querySelector('span').textContent = collapsed ? '▶' : '◀';
+    syncFloatingBtns();
+  }
+  if (rightSidebar) {
+    // Observe class changes on side-panel (from module's toggleSidebar)
+    var rObs = new MutationObserver(syncRightSidebarUI);
+    rObs.observe(rightSidebar, { attributes: true, attributeFilter: ['class'] });
+  }
+  if (rightToggle && rightSidebar) {
+    rightToggle.addEventListener('click', function() {
+      rightSidebar.classList.toggle('collapsed');
+      syncRightSidebarUI();
+    });
+  }
+  if (closeRight && rightSidebar) {
+    closeRight.addEventListener('click', function() {
+      rightSidebar.classList.add('collapsed');
+      syncRightSidebarUI();
+    });
+  }
+
+  // Text overlay expand
+  if (btnOvExpand && textOverlay) {
+    btnOvExpand.addEventListener('click', function() {
+      textOverlay.classList.remove('collapsed');
+    });
+  }
+
+  // Click game area → close text overlay
+  if (gameArea && textOverlay) {
+    gameArea.addEventListener('click', function(e) {
+      if (!textOverlay.classList.contains('collapsed') &&
+          !textOverlay.contains(e.target) &&
+          e.target !== btnOvExpand) {
+        textOverlay.classList.add('collapsed');
+      }
+    });
+  }
+
+  // Initial sidebar state: both hidden
+  if (rightSidebar) rightSidebar.classList.add('collapsed');
+  syncFloatingBtns();
+
+  // Show game-only buttons when game is loaded (observe game-view)
+  const gameView = document.getElementById('game-view');
+  if (gameView) {
+    const obs = new MutationObserver(function() {
+      const inGame = !gameView.classList.contains('hidden');
+      document.querySelectorAll('.game-upload-only').forEach(function(el) {
+        el.style.display = inGame ? '' : 'none';
+      });
+      if (inGame) {
+        // Hide library-only header buttons
+        var grid=document.getElementById('btn-view-grid'), list=document.getElementById('btn-view-list'), add=document.getElementById('btn-add-game');
+        if(grid)grid.style.display='none';
+        if(list)list.style.display='none';
+        if(add)add.style.display='none';
+        if(leftToggle)leftToggle.style.display='';
+        if(rightToggle)rightToggle.style.display='';
+        syncFloatingBtns();
+      } else {
+        var grid=document.getElementById('btn-view-grid'), list=document.getElementById('btn-view-list'), add=document.getElementById('btn-add-game');
+        if(grid)grid.style.display='';
+        if(list)list.style.display='';
+        if(add)add.style.display='';
+        if(leftToggle)leftToggle.style.display='none';
+        if(rightToggle)rightToggle.style.display='none';
+      }
+    });
+    obs.observe(gameView, { attributes: true, attributeFilter: ['class'] });
+  }
+
+  // ── Placeholder visibility: hide when iframe loads ──────────────────
+  const gameIframe = document.getElementById('game-iframe');
+  const placeholder = document.getElementById('game-placeholder');
+  if (gameIframe && placeholder) {
+    gameIframe.addEventListener('load', function() {
+      placeholder.style.display = 'none';
+      gameIframe.style.display = '';
+      console.log('[UI] 🎮 游戏已加载，占位符已隐藏');
+    });
+    // When returning to home view, show placeholder again
+    if (gameView) {
+      const obs2 = new MutationObserver(function() {
+        if (gameView.classList.contains('hidden')) {
+          placeholder.style.display = '';
+          gameIframe.style.display = 'none';
+        }
+      });
+      obs2.observe(gameView, { attributes: true, attributeFilter: ['class'] });
+    }
+  }
+
+  // ── Fullscreen: auto-hide header, tap top to reveal ────────────────
+  (function() {
+    var header = document.querySelector('header');
+    var hotzone = document.createElement('div');
+    hotzone.className = 'fs-hotzone';
+    document.body.appendChild(hotzone);
+
+    var hideTimer = null;
+
+    function showHeader() {
+      document.body.classList.remove('fs-active');
+      if (hideTimer) clearTimeout(hideTimer);
+      hideTimer = setTimeout(function() {
+        if (document.fullscreenElement) document.body.classList.add('fs-active');
+      }, 3000);
+    }
+
+    document.addEventListener('fullscreenchange', function() {
+      if (document.fullscreenElement) {
+        document.body.classList.add('fs-active');
+      } else {
+        document.body.classList.remove('fs-active');
+        if (hideTimer) clearTimeout(hideTimer);
+      }
+    });
+
+    // Tap top edge or hotzone to reveal header
+    hotzone.addEventListener('click', showHeader);
+    hotzone.addEventListener('touchend', showHeader);
+
+    // Also reveal on mousemove near top
+    document.addEventListener('mousemove', function(e) {
+      if (document.fullscreenElement && e.clientY < 6) showHeader();
+    });
+  })();
+
+  // ── Save upload validation: only accept .rmmzsave / .rpgsave ──────
+  (function() {
+    var upload = document.getElementById('upload-save-side');
+    if (upload) {
+      upload.addEventListener('change', function(e) {
+        var file = upload.files[0];
+        if (!file) return;
+        var name = file.name.toLowerCase();
+        if (!name.endsWith('.rmmzsave') && !name.endsWith('.rpgsave')) {
+          alert('⚠️ 非存档文件，请重试！\n\n仅支持 .rmmzsave 或 .rpgsave 格式的存档文件。\n当前文件: ' + file.name);
+          upload.value = '';
+          // Stop propagation so module handler doesn't run
+          e.stopImmediatePropagation();
+          e.preventDefault();
+        }
+      }, true); // capture phase — runs before module handler
+    }
+  })();
+
+  // ── Save entry enhancement: auto/manual annotation ─────────────────
+  (function() {
+    var saveList = document.getElementById('save-list');
+    if (!saveList) return;
+
+    function enhanceSaveEntries() {
+        var entries = saveList.querySelectorAll('.save-entry');
+        entries.forEach(function(entry) {
+            if (entry.dataset.enhanced) return; // already done
+            entry.dataset.enhanced = '1';
+            var span = entry.querySelector('span');
+            if (!span) return;
+            var dlBtn = entry.querySelector('.btn-dl');
+            if (!dlBtn) return;
+            var key = dlBtn.getAttribute('data-key');
+            if (!key) return;
+
+            var rawName = key;
+            var m = key.match(/\.([^.]+)$/);
+            if (m) rawName = m[1];
+            var m2 = key.match(/^RPG Save (.+)$/);
+            if (m2) rawName = 'file' + m2[1];
+
+            var saveNum = parseInt(rawName.replace(/^file/i,''));
+            var saveTag = rawName;
+            if (!isNaN(saveNum)) {
+                saveTag = (saveNum === 0) ? '🟢 自动存档' : '💾 手动存档 #' + saveNum;
+            }
+
+            span.innerHTML = '<span style="font-weight:600;">' + escHtml(saveTag) + '</span>' +
+                ' <span style="font-size:9px;color:var(--mute);">(' + escHtml(rawName) + ')</span>';
+        });
+    }
+
+    function escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+    enhanceSaveEntries();
+    var saveObs = new MutationObserver(enhanceSaveEntries);
+    saveObs.observe(saveList, { childList: true, subtree: true });
+  })();
+
+  // ── Convert select elements to toggle switches ──────────────────────
+  (function() {
+    // Helper: replace a <select> with a toggle switch
+    function selectToToggle(selectId, onVal, offVal) {
+      var sel = document.getElementById(selectId);
+      if (!sel) return;
+      var parent = sel.parentNode;
+      if (!parent) return;
+
+      // Read current value
+      var isOn = (sel.value === onVal);
+
+      // Create toggle
+      var label = document.createElement('label');
+      label.className = 'toggle-switch';
+      var input = document.createElement('input');
+      input.type = 'checkbox';
+      input.checked = isOn;
+      input.addEventListener('change', function() {
+        sel.value = input.checked ? onVal : offVal;
+        sel.dispatchEvent(new Event('change', { bubbles: true }));
+      });
+      var slider = document.createElement('span');
+      slider.className = 'toggle-slider';
+      label.appendChild(input);
+      label.appendChild(slider);
+
+      // Hide select, insert toggle after it
+      sel.style.display = 'none';
+      parent.appendChild(label);
+
+      // Sync: if something else changes the select, update toggle
+      sel.addEventListener('change', function() {
+        input.checked = (sel.value === onVal);
+      });
+    }
+
+    // Convert: 虚拟手柄 (on/off), 提取模式 (auto/manual), TTS (auto/manual/off)
+    selectToToggle('sel-vgpad', 'on', 'off');
+    selectToToggle('sel-quick-mode', 'auto', 'manual');
+    // TTS has 3 values — keep as select for now, but style it
+    var ttsSel = document.getElementById('sel-quick-tts');
+    if (ttsSel) ttsSel.style.cssText += ';min-width:70px;';
+
+    // Convert overlay opacity to range slider
+    var opacitySel = document.getElementById('sel-ov-opacity');
+    if (opacitySel) {
+      var parent = opacitySel.parentNode;
+      var range = document.createElement('input');
+      range.type = 'range';
+      range.className = 'opacity-slider';
+      range.min = '0.5'; range.max = '0.95'; range.step = '0.05';
+      range.value = opacitySel.value;
+      range.style.cssText = 'flex:1;min-width:80px;margin:0 8px;';
+      // Sync range → select
+      range.addEventListener('input', function() {
+        // Find closest option
+        var val = parseFloat(range.value);
+        var opts = opacitySel.options;
+        var best = opts[0];
+        for (var i = 0; i < opts.length; i++) {
+          if (Math.abs(parseFloat(opts[i].value) - val) < Math.abs(parseFloat(best.value) - val)) {
+            best = opts[i];
+          }
+        }
+        opacitySel.value = best.value;
+        opacitySel.dispatchEvent(new Event('change', { bubbles: true }));
+      });
+      // Sync select → range
+      opacitySel.addEventListener('change', function() {
+        range.value = opacitySel.value;
+      });
+      opacitySel.style.display = 'none';
+      parent.appendChild(range);
+    }
+  })();
+
+  console.log('[UI] 交互脚本已加载 — 侧边栏默认隐藏，浮动按钮控制');
+})();
+</script>
+
+<!-- ====================================================================== -->
+<!-- GAMEPAD-SYSTEM — state-isolated gamepad driver                          -->
+<!-- ====================================================================== -->
+<script>
+(function(){
+'use strict';
+
+console.log('[Gamepad-System] 🚀 驱动初始化…');
+console.log('[Gamepad-System] ℹ️  菜单键: Select(8) / Home(16) 切换网页覆盖层');
+console.log('[Gamepad-System] ℹ️  菜单中: 方向键=导航 · A=确认 · B=关闭');
+
+let isMenuOpen = false, gamepadConnected = false;
+window.__gamepadIsMenuOpen = false;
+let prevButtons = new Array(18).fill(false), prevAxes = [0,0,0,0], rafId = null;
+let repeatTimers = {};
+const REPEAT_DELAY = 400, REPEAT_INTERVAL = 100, DEAD_ZONE = 0.55;
+const MENU_TOGGLE_KEY = 8, MENU_TOGGLE_ALT = 16;
+
+let gpadIsolate = true;
+const ISOLATE_KEY = 'rm-vfs-gpad-isolate';
+try { const v = localStorage.getItem(ISOLATE_KEY); if (v === 'off') gpadIsolate = false; } catch(_) {}
+const selIsolate = document.getElementById('sel-gpad-isolate');
+if (selIsolate) {
+    selIsolate.value = gpadIsolate ? 'on' : 'off';
+    selIsolate.addEventListener('change', function() {
+        gpadIsolate = (selIsolate.value === 'on');
+        try { localStorage.setItem(ISOLATE_KEY, selIsolate.value); } catch(_) {}
+        console.log('[Gamepad-System] ⚙ 手柄隔离: ' + (gpadIsolate ? '开启' : '关闭'));
+    });
+}
+
+function openMenu() {
+    if (isMenuOpen) return;
+    isMenuOpen = true; window.__gamepadIsMenuOpen = true;
+    console.log('[Gamepad-System] 📋 菜单打开');
+
+    const leftSb = document.getElementById('sidebar-left');
+    const rightSb = document.getElementById('side-panel');
+    if (leftSb && !leftSb.classList.contains('active')) leftSb.classList.add('active');
+    if (rightSb && rightSb.classList.contains('collapsed')) rightSb.classList.remove('collapsed');
+
+    setTimeout(() => {
+        const els = getFocusable();
+        if (els.length > 0) { els[0].focus(); console.log('[Gamepad-System] 🎯 焦点:', els[0].id || els[0].tagName, '(' + els.length + '个)'); }
+    }, 120);
+}
+function closeMenu() {
+    if (!isMenuOpen) return;
+    isMenuOpen = false; window.__gamepadIsMenuOpen = false;
+    console.log('[Gamepad-System] 📋 菜单关闭');
+    try { if (document.activeElement) document.activeElement.blur(); } catch(_) {}
+}
+function toggleMenu() { if (isMenuOpen) closeMenu(); else openMenu(); }
+
+function getFocusable() {
+    const selector = 'button:not([disabled]):not([tabindex="-1"]), select:not([disabled]):not([tabindex="-1"]), input:not([disabled]):not([tabindex="-1"]):not([type="hidden"]):not([type="file"]), [tabindex="0"]:not([disabled])';
+    return Array.from(document.querySelectorAll(selector)).filter(function(el) {
+        if (el.offsetParent === null) return false;
+        const s = getComputedStyle(el);
+        return s.visibility !== 'hidden' && s.opacity !== '0';
+    });
+}
+
+function navigateFocus(direction) {
+    try {
+        const els = getFocusable();
+        if (els.length === 0) { console.warn('[Gamepad-System] ⚠️ 路由未匹配 [' + direction + ']'); return; }
+        const current = document.activeElement, idx = els.indexOf(current);
+        let nextIdx;
+        if (idx === -1) { nextIdx = 0; }
+        else {
+            const cr = current.getBoundingClientRect();
+            let candidates = [];
+            if (direction === 'Down') {
+                candidates = els.map(function(el,i){ return {i:i,r:el.getBoundingClientRect()}; }).filter(function(c){ return c.r.top > cr.top + 4; });
+                candidates.sort(function(a,b){ var da=Math.abs(a.r.left-cr.left),db=Math.abs(b.r.left-cr.left); if(Math.abs(da-db)>20)return da-db; return a.r.top-b.r.top; });
+            } else if (direction === 'Up') {
+                candidates = els.map(function(el,i){ return {i:i,r:el.getBoundingClientRect()}; }).filter(function(c){ return c.r.bottom < cr.top - 4; });
+                candidates.sort(function(a,b){ var da=Math.abs(a.r.left-cr.left),db=Math.abs(b.r.left-cr.left); if(Math.abs(da-db)>20)return da-db; return b.r.bottom-a.r.bottom; });
+            } else if (direction === 'Right') {
+                candidates = els.map(function(el,i){ return {i:i,r:el.getBoundingClientRect()}; }).filter(function(c){ return c.r.left > cr.left + 4; });
+                candidates.sort(function(a,b){ var da=Math.abs(a.r.top-cr.top),db=Math.abs(b.r.top-cr.top); if(Math.abs(da-db)>16)return da-db; return a.r.left-b.r.left; });
+            } else if (direction === 'Left') {
+                candidates = els.map(function(el,i){ return {i:i,r:el.getBoundingClientRect()}; }).filter(function(c){ return c.r.right < cr.left - 4; });
+                candidates.sort(function(a,b){ var da=Math.abs(a.r.top-cr.top),db=Math.abs(b.r.top-cr.top); if(Math.abs(da-db)>16)return da-db; return b.r.right-a.r.right; });
+            }
+            if (candidates.length > 0) { nextIdx = candidates[0].i; }
+            else { nextIdx = (direction==='Down'||direction==='Right') ? (idx>=els.length-1?0:idx+1) : (idx<=0?els.length-1:idx-1); }
+        }
+        var target = els[nextIdx];
+        if (target) { target.focus({preventScroll:false}); console.log('[Gamepad-System] 🧭 [' + direction + '] →', target.id||target.tagName); }
+    } catch(err) { console.error('[Gamepad-System] ❌ 导航异常:', err); }
+}
+
+function simulateClick(target) {
+    if (!target) return;
+    try { target.click(); } catch(err) { console.error('[Gamepad-System] ❌ 点击失败:', err); }
+}
+
+function startRepeat(key,cb){ if(repeatTimers[key])return; cb(); repeatTimers[key]={delayId:setTimeout(function(){ repeatTimers[key].delayId=null; repeatTimers[key].intervalId=setInterval(cb,REPEAT_INTERVAL); },REPEAT_DELAY)}; }
+function stopRepeat(key){ var t=repeatTimers[key]; if(!t)return; if(t.delayId)clearTimeout(t.delayId); if(t.intervalId)clearInterval(t.intervalId); delete repeatTimers[key]; }
+
+function gamepadLoop(){
+    try{
+        var gamepads=navigator.getGamepads(), gp=gamepads[0];
+        if(gp&&gp.connected){ if(!gamepadConnected){ gamepadConnected=true; console.log('[Gamepad-System] 🎮 已连接:',gp.id); updateUI(gp); } }
+        else if(gamepadConnected){ gamepadConnected=false; console.warn('[Gamepad-System] ⚠️ 已断开'); updateUI(null); prevButtons.fill(false); Object.keys(repeatTimers).forEach(function(k){ stopRepeat(+k); }); rafId=requestAnimationFrame(gamepadLoop); return; }
+        if(!gp||!gp.connected){ rafId=requestAnimationFrame(gamepadLoop); return; }
+
+        var buttons=gp.buttons, axes=gp.axes;
+        var curBtn=new Array(18).fill(false);
+        for(var i=0;i<Math.min(buttons.length,18);i++) curBtn[i]=buttons[i].pressed;
+        if(axes.length>=2){ curBtn[12]=curBtn[12]||(axes[1]<-DEAD_ZONE); curBtn[13]=curBtn[13]||(axes[1]>DEAD_ZONE); curBtn[14]=curBtn[14]||(axes[0]<-DEAD_ZONE); curBtn[15]=curBtn[15]||(axes[0]>DEAD_ZONE); }
+        if(axes.length>=4){ curBtn[12]=curBtn[12]||(axes[3]<-DEAD_ZONE); curBtn[13]=curBtn[13]||(axes[3]>DEAD_ZONE); curBtn[14]=curBtn[14]||(axes[2]<-DEAD_ZONE); curBtn[15]=curBtn[15]||(axes[2]>DEAD_ZONE); }
+
+        var justPressed=curBtn.map(function(v,i){ return v&&!prevButtons[i]; });
+        var justReleased=curBtn.map(function(v,i){ return !v&&prevButtons[i]; });
+
+        if(justPressed[MENU_TOGGLE_KEY]||justPressed[MENU_TOGGLE_ALT]){ toggleMenu(); }
+
+        if(isMenuOpen){
+            [{k:12,d:'Up'},{k:13,d:'Down'},{k:14,d:'Left'},{k:15,d:'Right'}].forEach(function(x){
+                if(justPressed[x.k]) startRepeat(x.k, function(){ navigateFocus(x.d); });
+                if(justReleased[x.k]) stopRepeat(x.k);
+            });
+            if(justPressed[0]){ var ae=document.activeElement; if(ae&&ae!==document.body&&ae!==document.documentElement) simulateClick(ae); }
+            if(justPressed[1]) closeMenu();
+        }
+
+        for(var i=0;i<18;i++) prevButtons[i]=curBtn[i];
+    }catch(err){ console.error('[Gamepad-System] ❌ 轮询异常:',err); }
+    rafId=requestAnimationFrame(gamepadLoop);
+}
+
+function updateUI(gp){
+    var connected=!!(gp&&gp.connected);
+    try{
+        var gs=document.getElementById('gamepad-status'), ig=document.getElementById('info-gamepad');
+        if(gs){ gs.textContent=connected?('已连接: '+(gp?gp.id.slice(0,28):'')):'未检测到'; gs.classList.toggle('connected',connected); }
+        if(ig) ig.textContent=connected?'已连接':'未连接';
+    }catch(err){}
+}
+
+// Focus guard: prevent UI focus during gameplay
+document.addEventListener('focusin', function(e) {
+    if (!gpadIsolate) return;
+    if (window.__gamepadIsMenuOpen) return;
+    if (!e.target || e.target === document.body) return;
+    var inUI = false;
+    var containers = ['sidebar-left','side-panel','settings-overlay','home-view'];
+    for (var i = 0; i < containers.length; i++) {
+        var c = document.getElementById(containers[i]);
+        if (c && c.contains(e.target)) { inUI = true; break; }
+    }
+    if (inUI) { e.target.blur(); console.log('[Gamepad-System] 🛡️ 拦截UI焦点: ' + (e.target.id||e.target.tagName)); }
+}, true);
+
+// Button interceptors: block Start→fullscreen during gameplay
+(function(){
+    var btnFS = document.getElementById('btn-fullscreen');
+    if (btnFS) {
+        btnFS.addEventListener('click', function(e) {
+            // Only block programmatic clicks (gamepad), not real user clicks
+            if (gpadIsolate && !isMenuOpen && !e.isTrusted) {
+                e.stopImmediatePropagation(); e.preventDefault();
+                console.log('[Gamepad-System] 🛡️ 拦截: Start→全屏(手柄)');
+            }
+        }, true);
+    }
+})();
+
+// Save notification on game boot
+(function(){
+    function ping() {
+        var iframe = document.getElementById('game-iframe');
+        if (!iframe || !iframe.contentWindow) return;
+        try { iframe.contentWindow.postMessage({source:'host-vfs',type:'refresh-saves'},'*'); } catch(_) {}
+    }
+    function pingAll(label) {
+        ping();
+        // Spread retries far apart — StorageManager can take 30s+ on slow games
+        [800,2000,5000,10000,20000,30000].forEach(function(ms){ setTimeout(ping, ms); });
+        console.log('[Gamepad-System] 💾 ' + (label||'存档通知') + ' 已排入重试队列(最长30s)');
+    }
+    var saveUpload = document.getElementById('upload-save-side');
+    if (saveUpload) {
+        saveUpload.addEventListener('change', function() {
+            pingAll('存档上传');
+            // Show toast suggesting restart for reliable detection
+            var toast = document.getElementById('toast');
+            if (toast) {
+                toast.textContent = '✅ 存档已导入！如游戏未检测到，请点击「🔄 重新检测」重启游戏';
+                toast.classList.add('show');
+                setTimeout(function(){ toast.classList.remove('show'); }, 5000);
+            }
+        });
+    }
+    // "重新检测" → restarts the game (guaranteed to pick up saves)
+    var btnRescan = document.getElementById('btn-rescan-saves');
+    if (btnRescan) {
+        btnRescan.addEventListener('click', function() {
+            var btnReload = document.getElementById('btn-reload');
+            if (btnReload) {
+                btnReload.click();
+                console.log('[Gamepad-System] 💾 正在重启游戏以重新检测存档...');
+            } else {
+                pingAll('手动检测');
+            }
+        });
+    }
+    var iframe = document.getElementById('game-iframe');
+    if (iframe) {
+        iframe.addEventListener('load', function() {
+            pingAll('游戏启动');
+        });
+    }
+})();
+
+// Event listeners
+window.addEventListener('gamepadconnected', function(e) { gamepadConnected=true; updateUI(e.gamepad); });
+window.addEventListener('gamepaddisconnected', function(e) { gamepadConnected=false; updateUI(null); prevButtons.fill(false); });
+
+document.addEventListener('keydown', function(e) {
+    if (e.ctrlKey && e.shiftKey && e.key === 'M') { e.preventDefault(); toggleMenu(); return; }
+    if (isMenuOpen) {
+        switch(e.key) {
+            case 'ArrowUp': e.preventDefault(); navigateFocus('Up'); break;
+            case 'ArrowDown': e.preventDefault(); navigateFocus('Down'); break;
+            case 'ArrowLeft': e.preventDefault(); navigateFocus('Left'); break;
+            case 'ArrowRight': e.preventDefault(); navigateFocus('Right'); break;
+            case 'Enter': e.preventDefault(); var ae=document.activeElement; if(ae&&ae!==document.body) simulateClick(ae); break;
+            case 'Escape': e.preventDefault(); closeMenu(); break;
+        }
+    }
+});
+
+var bootstrapped = false;
+function bootstrap() {
+    if (bootstrapped) return; bootstrapped = true;
+    console.log('[Gamepad-System] ✅ rAF 轮询已启动');
+    try { var gps=navigator.getGamepads(); for(var i=0;i<gps.length;i++){ if(gps[i]&&gps[i].connected){ gamepadConnected=true; updateUI(gps[i]); break; } } } catch(_) {}
+    rafId = requestAnimationFrame(gamepadLoop);
+}
+document.addEventListener('click', bootstrap, { once: true });
+document.addEventListener('touchstart', bootstrap, { once: true });
+document.addEventListener('keydown', bootstrap, { once: true });
+setTimeout(function(){ if(!bootstrapped) bootstrap(); }, 3000);
+console.log('[Gamepad-System] 🟢 手柄驱动就绪');
+})();
 </script>
 </body>
 </html>

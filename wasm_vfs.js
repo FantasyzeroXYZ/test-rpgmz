@@ -699,13 +699,17 @@ export class WasmVFS {
         // MZ: localforage with key rmmzsave.<gameId>.<saveName>
         const forageKey = `rmmzsave.${gameId}.${saveName}`;
         try {
+            // Write the actual save data into the correct slot so the game
+            // can detect and load it via StorageManager.loadFromForage().
+            await localforage.setItem(forageKey, zipString);
 
-            // Also update a "rmmzsave.test" key to ensure the backend is warm.
+            // Also touch a "rmmzsave.test" key to ensure the backend is warm
+            // (fixes browsers that defer IndexedDB init until first write).
             const testKey = `rmmzsave.test`;
             await localforage.setItem(testKey, zipString);
             setTimeout(() => localforage.removeItem(testKey), 100);
 
-            console.log(`WasmVFS: injected save "${saveName}" → localforage key "${forageKey}"`);
+            console.log(`WasmVFS: injected save "${saveName}" → localforage key "${forageKey}" (${zipString.length} bytes)`);
             return {
                 success: true,
                 key: forageKey,
