@@ -2,15 +2,13 @@
 
 /**
  * Clear the entire virtual file system, freeing all memory immediately.
- * After this call the internal HashMap is empty (but still initialised so
- * subsequent `write_file` calls work without an explicit `init_fs`).
  */
 export function clear_fs() {
     wasm.clear_fs();
 }
 
 /**
- * Return the number of files currently stored (useful for debugging / progress).
+ * Return the number of files currently stored.
  * @returns {number}
  */
 export function file_count() {
@@ -39,7 +37,7 @@ export function init_fs() {
 }
 
 /**
- * Return a JS array of all file paths (useful for debugging).
+ * Return a JS array of all file paths.
  * @returns {any[]}
  */
 export function list_paths() {
@@ -57,8 +55,7 @@ export function list_paths() {
 }
 
 /**
- * Return a clone of the bytes stored at `path`, or `None` if not found.
- * wasm-bindgen automatically marshals `Option<Vec<u8>>` ↔ `Uint8Array | null`.
+ * Return raw bytes stored at `path`, or `None` if not found.
  * @param {string} path
  * @returns {Uint8Array | undefined}
  */
@@ -82,8 +79,39 @@ export function read_file(path) {
 }
 
 /**
+ * Return decrypted bytes if the file is RPGMV-encrypted, or raw bytes if not.
+ * Accepts a 32-char hex encryption key. Returns `None` if file not found.
+ *
+ * This is the PREFERRED way to read encrypted assets — Rust performs the
+ * XOR decryption and returns a clean `Vec<u8>` that JS can pass directly
+ * to `new Blob()` without buffer compatibility issues.
+ * @param {string} path
+ * @param {string} hex_key
+ * @returns {Uint8Array | undefined}
+ */
+export function read_file_decrypted(path, hex_key) {
+    try {
+        const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+        const ptr0 = passStringToWasm0(path, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(hex_key, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const len1 = WASM_VECTOR_LEN;
+        wasm.read_file_decrypted(retptr, ptr0, len0, ptr1, len1);
+        var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+        var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+        let v3;
+        if (r0 !== 0) {
+            v3 = getArrayU8FromWasm0(r0, r1).slice();
+            wasm.__wbindgen_export3(r0, r1 * 1, 1);
+        }
+        return v3;
+    } finally {
+        wasm.__wbindgen_add_to_stack_pointer(16);
+    }
+}
+
+/**
  * Write raw bytes into the virtual file system at the given path.
- * Overwrites any existing entry silently.
  * @param {string} path
  * @param {Uint8Array} data
  */

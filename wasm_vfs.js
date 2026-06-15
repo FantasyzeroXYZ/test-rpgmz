@@ -12,6 +12,7 @@ import init, {
     write_file,
     has_file,
     read_file,
+    read_file_decrypted,
     clear_fs,
     file_count,
     list_paths
@@ -178,11 +179,16 @@ function deriveKeyFromEncryptedImage(encryptedData) {
  * @returns {Uint8Array} Decrypted content (without the RPGMV header).
  */
 function decryptRpgmvData(data, hexKey) {
+    // RPG Maker only encrypts the first 16 bytes of the file body.
+    // Rest is plaintext. Matches engine's Utils.decryptArrayBuffer.
     const keyBytes = hexKey.match(/.{2}/g).map(b => parseInt(b, 16));
     const contentLen = data.length - 16;
     const result = new Uint8Array(contentLen);
     for (let i = 0; i < contentLen; i++) {
-        result[i] = data[i + 16] ^ keyBytes[i % 16];
+        result[i] = data[i + 16];
+    }
+    for (let i = 0; i < 16 && i < contentLen; i++) {
+        result[i] ^= keyBytes[i];
     }
     return result;
 }
@@ -753,15 +759,15 @@ export class WasmVFS {
             try {
                 const decoder = new TextDecoder('utf-8');
                 const system = JSON.parse(decoder.decode(raw));
-                // VFS decrypts transparently — engine should NOT try to decrypt.
-                // Setting hasEncryptedImages=false ensures engine requests regular
-                // filenames (e.g. Title.png). VFS maps these to encrypted files.
-                system.hasEncryptedImages = false;
-                system.hasEncryptedAudio = false;
+                // Keep hasEncryptedImages=true so the engine uses its XHR-based
+                // decryption path which creates blob URLs IN the iframe.
+                // Cross-context blob URLs (parent → iframe) fail to load.
+                system.hasEncryptedImages = true;
+                system.hasEncryptedAudio = true;
                 system.encryptionKey = hexKey;
                 const encoded = new TextEncoder().encode(JSON.stringify(system));
                 write_file(sysPath, encoded);
-                console.log(`WasmVFS: patched "${sysPath}" — encryptedImages=false (VFS decrypts), key saved`);
+                console.log(`WasmVFS: patched "${sysPath}" — encryptedImages=true, key saved`);
                 return;
             } catch (e) {
                 console.warn('WasmVFS: failed to patch System.json:', e);
@@ -863,13 +869,11 @@ export class WasmVFS {
      * @returns {Uint8Array|null}
      */
     _readFileData(path, raw) {
-        const data = read_file(path);
-        if (!data || raw) return data;
-        if (this._encryptionInfo && this._encryptionInfo.key &&
-            this._isEncryptedPath(path) && hasRpgmvHeader(data)) {
-            return decryptRpgmvData(data, this._encryptionInfo.key);
-        }
-        return data;
+        if (raw) return read_file(path);
+        // Decrypt via Rust (16-byte XOR matching the engine).
+        // For non-encrypted files, read_file_decrypted returns raw bytes.
+        const hexKey = (this._encryptionInfo && this._encryptionInfo.key) ? this._encryptionInfo.key : '';
+        return read_file_decrypted(path, hexKey);
     }
 
     // =========================================================================
@@ -942,12 +946,16 @@ export class WasmVFS {
             return this._imageBlobCache.get(actual);
         }
 
-        let data = this._readFileData(actual);
+        // Read with Rust-side decryption for encrypted files (returns clean Vec<u8>).
+        // For non-encrypted files, read_file passthrough does the same thing.
+        // Using read_file_decrypted for both paths is safe and avoids branching.
+        const hexKey = (this._encryptionInfo && this._encryptionInfo.key) ? this._encryptionInfo.key : '';
+        const data = read_file_decrypted(actual, hexKey);
         if (!data) return null;
 
         let mime = mimeType || guessMime(internalPath);
-        // Fix MIME for decrypted content
-        if (this._encryptionInfo && this._encryptionInfo.key && this._isEncryptedPath(actual)) {
+        // Fix MIME for encrypted file extensions
+        if (hexKey && this._isEncryptedPath(actual)) {
             const lo = actual.toLowerCase();
             if (lo.endsWith('.png_') || lo.endsWith('.rpgmvp')) mime = 'image/png';
             else if (lo.endsWith('.ogg_') || lo.endsWith('.rpgmvo')) mime = 'audio/ogg';
@@ -955,13 +963,19 @@ export class WasmVFS {
             else if (lo.endsWith('.jpg_') || lo.endsWith('.jpeg_')) mime = 'image/jpeg';
         }
 
+        // Return the clean ArrayBuffer from WASM. Caller is responsible for
+        // creating a blob/data URL in the appropriate context.
+        // The sandbox's Image.src setter uses vfs.readRawFile() instead of
+        // createMediaUrl() to build the data URL locally in the iframe.
         const blob = new Blob([data], { type: mime });
         const url = URL.createObjectURL(blob);
         this._activeBlobUrls.add(url);
 
-        // If it's an image, cache the blob URL.
+        // If it's an image, cache the blob URL keyed by the resolved (actual) VFS path.
+        // This ensures consistent cache hits regardless of the requested path
+        // (e.g. "Title.png" vs "Title.png_") resolving to the same file.
         if (mime.startsWith('image/')) {
-            this._imageBlobCache.set(internalPath, url);
+            this._imageBlobCache.set(actual, url);
         }
 
         return url;
@@ -976,7 +990,10 @@ export class WasmVFS {
     revokeMediaUrl(blobUrl) {
         if (!blobUrl || !this._activeBlobUrls.has(blobUrl)) return;
 
-        URL.revokeObjectURL(blobUrl);
+        // Only revoke blob: URLs (data: URLs don't need revocation)
+        if (blobUrl.startsWith('blob:')) {
+            try { URL.revokeObjectURL(blobUrl); } catch (_) {}
+        }
         this._activeBlobUrls.delete(blobUrl);
 
         // Also remove from image cache.

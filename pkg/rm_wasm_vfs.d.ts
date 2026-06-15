@@ -3,13 +3,11 @@
 
 /**
  * Clear the entire virtual file system, freeing all memory immediately.
- * After this call the internal HashMap is empty (but still initialised so
- * subsequent `write_file` calls work without an explicit `init_fs`).
  */
 export function clear_fs(): void;
 
 /**
- * Return the number of files currently stored (useful for debugging / progress).
+ * Return the number of files currently stored.
  */
 export function file_count(): number;
 
@@ -25,19 +23,27 @@ export function has_file(path: string): boolean;
 export function init_fs(): void;
 
 /**
- * Return a JS array of all file paths (useful for debugging).
+ * Return a JS array of all file paths.
  */
 export function list_paths(): any[];
 
 /**
- * Return a clone of the bytes stored at `path`, or `None` if not found.
- * wasm-bindgen automatically marshals `Option<Vec<u8>>` ↔ `Uint8Array | null`.
+ * Return raw bytes stored at `path`, or `None` if not found.
  */
 export function read_file(path: string): Uint8Array | undefined;
 
 /**
+ * Return decrypted bytes if the file is RPGMV-encrypted, or raw bytes if not.
+ * Accepts a 32-char hex encryption key. Returns `None` if file not found.
+ *
+ * This is the PREFERRED way to read encrypted assets — Rust performs the
+ * XOR decryption and returns a clean `Vec<u8>` that JS can pass directly
+ * to `new Blob()` without buffer compatibility issues.
+ */
+export function read_file_decrypted(path: string, hex_key: string): Uint8Array | undefined;
+
+/**
  * Write raw bytes into the virtual file system at the given path.
- * Overwrites any existing entry silently.
  */
 export function write_file(path: string, data: Uint8Array): void;
 
@@ -50,6 +56,7 @@ export interface InitOutput {
     readonly init_fs: () => void;
     readonly list_paths: (a: number) => void;
     readonly read_file: (a: number, b: number, c: number) => void;
+    readonly read_file_decrypted: (a: number, b: number, c: number, d: number, e: number) => void;
     readonly write_file: (a: number, b: number, c: number, d: number) => void;
     readonly file_count: () => number;
     readonly __wbindgen_export: (a: number, b: number) => number;

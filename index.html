@@ -634,8 +634,8 @@ input[type=range].opacity-slider::-webkit-slider-thumb{-webkit-appearance:none;w
 <!-- ===== HIDDEN TOOLBAR (JS references this, kept for compatibility) ===== -->
 <div id="toolbar" style="display:none;"></div>
 <script type="module">
-console.log('=== rm-wasm-vfs v2.1 ===');
 import { WasmVFS } from './wasm_vfs.js';
+console.log('=== rm-wasm-vfs v2.1 ===');
 
 // =========================================================================
 // IndexedDB Game Library
@@ -2161,7 +2161,7 @@ function buildSandboxDocument(gameHtml){
         'canvas{display:block;}</style>');
     // Rewrite <link href> → inline <style>
     rewroteHtml=rewroteHtml.replace(
-        /(<link\b[^>]*\shref\s*=\s*["'])([^"']+)(["'][^>]*>)/gi,
+        /(<link\b[^>]*\brel\s*=\s*["']stylesheet["'][^>]*\shref\s*=\s*["'])([^"']+)(["'][^>]*>)/gi,
         (match,before,url,after)=>{
             const normPath=vfs.normalizePath(url);
             if(vfs.fileExists(normPath)){
@@ -2242,7 +2242,7 @@ window.fetch=function(input,init){
     // Try encrypted filename variants
     if(vfs){
         var _lo=normPath.toLowerCase();
-        if(!_lo.endsWith('.png_')&&!_lo.endsWith('.rpgmvp')&&!_lo.endsWith('.ogg_')&&!_lo.endsWith('.m4a_')){
+        if(!_lo.endsWith('.png_')&&!_lo.endsWith('.rpgmvp')&&!_lo.endsWith('.jpg_')&&!_lo.endsWith('.jpeg_')&&!_lo.endsWith('.ogg_')&&!_lo.endsWith('.m4a_')&&!_lo.endsWith('.rpgmvo')){
             var _tp=[normPath+'_'];
             if(/\.(png|jpg|jpeg)$/i.test(normPath)) _tp.push(normPath.replace(/\.(png|jpg|jpeg)$/i,'.rpgmvp'));
             if(/\.(ogg|m4a)$/i.test(normPath)) _tp.push(normPath.replace(/\.(ogg|m4a)$/i,'.rpgmvo'));
@@ -2266,7 +2266,7 @@ window.XMLHttpRequest=function(){
         if(vfs&&vfs.fileExists(normPath)){_intercepted=true;return;}
         // Try encrypted filename variants (.png_ / .rpgmvp / .ogg_)
         var _lo=normPath.toLowerCase();
-        if(vfs&&!_lo.endsWith('.png_')&&!_lo.endsWith('.rpgmvp')&&!_lo.endsWith('.ogg_')&&!_lo.endsWith('.m4a_')){
+        if(vfs&&!_lo.endsWith('.png_')&&!_lo.endsWith('.rpgmvp')&&!_lo.endsWith('.jpg_')&&!_lo.endsWith('.jpeg_')&&!_lo.endsWith('.ogg_')&&!_lo.endsWith('.m4a_')&&!_lo.endsWith('.rpgmvo')){
             var _tp=[normPath+'_'];
             if(/\.(png|jpg|jpeg)$/i.test(normPath)) _tp.push(normPath.replace(/\.(png|jpg|jpeg)$/i,'.rpgmvp'));
             if(/\.(ogg|m4a)$/i.test(normPath)) _tp.push(normPath.replace(/\.(ogg|m4a)$/i,'.rpgmvo'));
@@ -2329,21 +2329,30 @@ var _emptyPng='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcS
                 var tryPaths=[normPath];
                 if(vfs&&!vfs.fileExists(normPath)){
                     var lower=normPath.toLowerCase();
-                    if(!lower.endsWith('.png_')&&!lower.endsWith('.rpgmvp')&&!lower.endsWith('.ogg_')&&!lower.endsWith('.m4a_')){
+                    if(!lower.endsWith('.png_')&&!lower.endsWith('.rpgmvp')&&!lower.endsWith('.jpg_')&&!lower.endsWith('.jpeg_')&&!lower.endsWith('.ogg_')&&!lower.endsWith('.m4a_')&&!lower.endsWith('.rpgmvo')){
                         tryPaths.push(normPath+'_');
                         if(/\.(png|jpg|jpeg)$/i.test(normPath)) tryPaths.push(normPath.replace(/\.(png|jpg|jpeg)$/i,'.rpgmvp'));
                         if(/\.(ogg|m4a)$/i.test(normPath)) tryPaths.push(normPath.replace(/\.(ogg|m4a)$/i,'.rpgmvo'));
                     }
                 }
-                var foundBlob=null;
+                var rawData=null, mime='';
                 for(var ti=0;ti<tryPaths.length;ti++){
                     if(vfs&&vfs.fileExists(tryPaths[ti])){
-                        foundBlob=vfs.createMediaUrl(tryPaths[ti]);
-                        if(foundBlob) break;
+                        rawData=vfs.readRawFile(tryPaths[ti]);
+                        if(rawData) break;
                     }
                 }
-                if(foundBlob){
-                    this.__vfsBlobUrl=foundBlob;
+                if(rawData){
+                    // Create data: URL locally in iframe (avoids cross-context blob URL issue)
+                    mime=(/\.(png|jpg|jpeg)$/i.test(normPath))?'image/'+(RegExp.$1==='jpg'?'jpeg':RegExp.$1):'image/png';
+                    if(mime==='image/jpg') mime='image/jpeg';
+                    var _b='';
+                    for(var _i=0;_i<rawData.length;_i+=8192){
+                        var _end=Math.min(_i+8192,rawData.length);
+                        _b+=String.fromCharCode.apply(null,rawData.subarray(_i,_end));
+                    }
+                    var dataUrl='data:'+mime+';base64,'+btoa(_b);
+                    this.__vfsBlobUrl=dataUrl;
                     var self=this;
                     var origOnload=self.onload,origOnerror=self.onerror;
                     self.onload=function(e){
@@ -2352,9 +2361,12 @@ var _emptyPng='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcS
                     };
                     self.onerror=function(e){
                         if(self.__vfsBlobUrl){vfs.revokeMediaUrl(self.__vfsBlobUrl);self.__vfsBlobUrl=null;}
+                        // Debug: check if the URL is a blob URL (valid) or something else
+                        var _urlType=String(this.src).substring(0,20);
+                        try{window.parent.postMessage({source:'iframe-game',type:'img-enc-debug',path:normPath,hasEncInfo:!!(vfs&&vfs.encryptionInfo),hasKey:!!(vfs&&vfs.encryptionInfo&&vfs.encryptionInfo.key),urlType:_urlType},'*');}catch(e2){}
                         if(typeof origOnerror==='function') origOnerror.call(self,e);
                     };
-                    _set.call(this,foundBlob);return;
+                    _set.call(this,dataUrl);return;
                 }
                 // Missing image: use 1x1 transparent PNG to prevent 404s
                 if(vfs){_set.call(this,_emptyPng);return;}
@@ -2623,85 +2635,33 @@ function hookStorageManager(){
 }
 setInterval(function(){if(typeof StorageManager!=='undefined') hookStorageManager();},50);
 // ---- Encryption key injection ----
-// TWO-LAYER HOOK:
-// 1. Proxy on Decrypter — intercepts hasEncryptedImages/_encryptionKey SETS
-//    so the engine's own init code can't overwrite our values.
-// 2. Utils.setEncryptionInfo as backup (called once available).
-var __vfsEncDone=false, __vfsEncKey='', __vfsEncHasImg=false, __vfsEncHasAud=false;
-function __vfsGetEncInfo(){
-    if(__vfsEncKey) return;
-    var vfs=getVfs();
-    if(vfs&&vfs.encryptionInfo&&vfs.encryptionInfo.key){
-        __vfsEncKey=vfs.encryptionInfo.key;
-        __vfsEncHasImg=vfs.encryptionInfo.hasImages!==false;
-        __vfsEncHasAud=vfs.encryptionInfo.hasAudio!==false;
+// VFS decrypts via Rust (16-byte XOR). Engine must NOT decrypt again.
+var __vfsEncKey='', __vfsEncHooked=0;
+(function(){var v=getVfs();if(v&&v.encryptionInfo&&v.encryptionInfo.key)__vfsEncKey=v.encryptionInfo.key;})();
+var __vfsEncPoll=setInterval(function(){
+    if(typeof Utils!=='undefined'&&typeof Utils.setEncryptionInfo==='function'&&!(__vfsEncHooked&1)){
+        __vfsEncHooked|=1;
+        Utils.setEncryptionInfo=function(a,b,k){
+            Utils._hasEncryptedImages=false;Utils._hasEncryptedAudio=false;
+            Utils._encryptionKey=k||__vfsEncKey;
+        };
+        Utils.hasEncryptedImages=function(){return false;};
+        Utils.hasEncryptedAudio=function(){return false;};
+        Utils.decryptArrayBuffer=function(s){return s;};
+        if(typeof Utils.isNwjs==='function') Utils.isNwjs=function(){return false;};
     }
-}
-__vfsGetEncInfo(); // try immediately
-// Hook 1: Proxy on Decrypter — intercept assignment of encrypted-image flags.
-// RPG Maker MZ/MV sets these in rpg_core.js:
-//   Decrypter.hasEncryptedImages = ...;
-//   Decrypter._encryptionKey = ...;
-var __vfsDecrypter=undefined;
-try{
-    Object.defineProperty(window,'Decrypter',{
-        configurable:true,enumerable:true,
-        get:function(){return __vfsDecrypter;},
-        set:function(raw){
-            if(!raw||typeof raw!=='object'){__vfsDecrypter=raw;return;}
-            __vfsGetEncInfo();
-            __vfsDecrypter=new Proxy(raw,{
-                set:function(target,prop,value){
-                    // VFS decrypts transparently — engine should NOT try to decrypt
-                    if(prop==='hasEncryptedImages'){
-                        target[prop]=false;
-                        console.log('[VFS] Decrypter.hasEncryptedImages → false (VFS decrypts transparently)');
-                        return true;
-                    }
-                    if(prop==='hasEncryptedAudio'){
-                        target[prop]=false;
-                        return true;
-                    }
-                    // Store key for plugins that may read it, but don't use for decryption
-                    if(prop==='_encryptionKey'&&__vfsEncKey){
-                        target[prop]=__vfsEncKey;
-                        console.log('[VFS] Decrypter._encryptionKey stored (len='+__vfsEncKey.length+')');
-                        return true;
-                    }
-                    // Pass through all other assignments
-                    target[prop]=value;
-                    return true;
-                }
-            });
-        }
-    });
-}catch(e){/* ignore */}
-
-// Hook 2: Utils.setEncryptionInfo — backup, fires once Utils is fully defined.
-var __vfsUtils=undefined;
-function __vfsTryInjectUtils(){
-    if(__vfsEncDone) return;
-    if(!__vfsUtils||typeof __vfsUtils.setEncryptionInfo!=='function') return;
-    __vfsEncDone=true;
-    __vfsGetEncInfo();
-    if(__vfsEncKey){
-        __vfsUtils.isNwjs=function(){return false;};
+    if(typeof Decrypter!=='undefined'&&typeof Decrypter==='function'&&!(__vfsEncHooked&2)){
+        __vfsEncHooked|=2;
         try{
-            __vfsUtils.setEncryptionInfo(__vfsEncHasImg,__vfsEncHasAud,__vfsEncKey);
-            console.log('[VFS] Utils.setEncryptionInfo called. key='+__vfsEncKey.slice(0,8)+'…');
-        }catch(e){console.warn('[VFS] setEncryptionInfo failed:',e);}
+            Object.defineProperty(Decrypter,'hasEncryptedImages',{get:function(){return false;},set:function(v){},configurable:true,enumerable:true});
+            Object.defineProperty(Decrypter,'hasEncryptedAudio',{get:function(){return false;},set:function(v){},configurable:true,enumerable:true});
+        }catch(e){}
     }
-}
-try{
-    Object.defineProperty(window,'Utils',{
-        configurable:true,enumerable:true,
-        get:function(){return __vfsUtils;},
-        set:function(v){__vfsUtils=v;__vfsTryInjectUtils();}
-    });
-}catch(e){/* fallback: poll */ var __vfsPoll2=setInterval(__vfsTryInjectUtils,16);}
-// Secondary poll for edge cases (auto-stops after 10s)
-var __vfsRafPoll2=setInterval(__vfsTryInjectUtils,16);
-setTimeout(function(){clearInterval(__vfsRafPoll2);},10000);
+    if(__vfsEncHooked===3) clearInterval(__vfsEncPoll);
+},50);
+setTimeout(function(){clearInterval(__vfsEncPoll);},12000);
+
+
 // Anchor tag
 var origSetAttr=HTMLAnchorElement.prototype.setAttribute;
 HTMLAnchorElement.prototype.setAttribute=function(name,value){
@@ -2748,6 +2708,9 @@ console.log('[VFS Sandbox] Interception layer injected. VFS available:',!!getVfs
 window.addEventListener('message',e=>{
     if(!e.data||e.data.source!=='iframe-game') return;
     switch(e.data.type){
+        case'img-enc-debug':
+            console.warn('[Host ENC DEBUG] path:',e.data.path,'hasKey:',e.data.hasKey,'urlType:',e.data.urlType);
+            break;
         case'save-updated':refreshSaveList();break;
         case'text-extracted':(textOutput||{}).textContent=e.data.text||'(no text)';break;
         case'text-changed':

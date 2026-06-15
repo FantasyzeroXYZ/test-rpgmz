@@ -6,6 +6,7 @@ export const has_file: (a: number, b: number) => number;
 export const init_fs: () => void;
 export const list_paths: (a: number) => void;
 export const read_file: (a: number, b: number, c: number) => void;
+export const read_file_decrypted: (a: number, b: number, c: number, d: number, e: number) => void;
 export const write_file: (a: number, b: number, c: number, d: number) => void;
 export const file_count: () => number;
 export const __wbindgen_export: (a: number, b: number) => number;

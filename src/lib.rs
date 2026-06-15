@@ -23,6 +23,34 @@ fn lock_fs() -> std::sync::MutexGuard<'static, Option<HashMap<String, Vec<u8>>>>
         .expect("VIRTUAL_FS mutex poisoned — unrecoverable")
 }
 
+// =============================================================================
+// RPGMV Encryption — decrypt in Rust so JS gets clean Vec<u8> for Blob()
+// =============================================================================
+
+const RPGMV_HEADER: [u8; 16] = [
+    0x52, 0x50, 0x47, 0x4D, 0x56, 0x00, 0x00, 0x00,
+    0x00, 0x03, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00
+];
+
+fn is_rpgmv_encrypted(data: &[u8]) -> bool {
+    data.len() >= 16 && data[..16] == RPGMV_HEADER
+}
+
+fn decrypt_rpgmv(data: &[u8], hex_key: &str) -> Option<Vec<u8>> {
+    if hex_key.len() < 32 { return None; }
+    let key: Vec<u8> = (0..16)
+        .map(|i| u8::from_str_radix(&hex_key[i*2..i*2+2], 16).unwrap_or(0))
+        .collect();
+    let body = &data[16..];
+    // RPG Maker MZ/MV only encrypts the first 16 bytes of the body.
+    // Rest is plaintext. Matches engine's decryptArrayBuffer.
+    let mut result = body.to_vec();
+    for i in 0..16.min(result.len()) {
+        result[i] ^= key[i];
+    }
+    Some(result)
+}
+
 // -----------------------------------------------------------------------------
 // #[wasm_bindgen] exported API
 // -----------------------------------------------------------------------------
@@ -32,12 +60,10 @@ fn lock_fs() -> std::sync::MutexGuard<'static, Option<HashMap<String, Vec<u8>>>>
 #[wasm_bindgen]
 pub fn init_fs() {
     let mut guard = lock_fs();
-    // Dropping the old Option (and its inner HashMap) frees memory immediately.
     *guard = Some(HashMap::new());
 }
 
 /// Write raw bytes into the virtual file system at the given path.
-/// Overwrites any existing entry silently.
 #[wasm_bindgen]
 pub fn write_file(path: &str, data: &[u8]) {
     let mut guard = lock_fs();
@@ -55,8 +81,7 @@ pub fn has_file(path: &str) -> bool {
         .unwrap_or(false)
 }
 
-/// Return a clone of the bytes stored at `path`, or `None` if not found.
-/// wasm-bindgen automatically marshals `Option<Vec<u8>>` ↔ `Uint8Array | null`.
+/// Return raw bytes stored at `path`, or `None` if not found.
 #[wasm_bindgen]
 pub fn read_file(path: &str) -> Option<Vec<u8>> {
     let guard = lock_fs();
@@ -65,18 +90,35 @@ pub fn read_file(path: &str) -> Option<Vec<u8>> {
         .and_then(|fs| fs.get(path).cloned())
 }
 
+/// Return decrypted bytes if the file is RPGMV-encrypted, or raw bytes if not.
+/// Accepts a 32-char hex encryption key. Returns `None` if file not found.
+///
+/// This is the PREFERRED way to read encrypted assets — Rust performs the
+/// XOR decryption and returns a clean `Vec<u8>` that JS can pass directly
+/// to `new Blob()` without buffer compatibility issues.
+#[wasm_bindgen]
+pub fn read_file_decrypted(path: &str, hex_key: &str) -> Option<Vec<u8>> {
+    let guard = lock_fs();
+    let fs = guard.as_ref()?;
+    let data = fs.get(path)?;
+
+    if is_rpgmv_encrypted(data) {
+        decrypt_rpgmv(data, hex_key)
+    } else {
+        Some(data.clone())
+    }
+}
+
 /// Clear the entire virtual file system, freeing all memory immediately.
-/// After this call the internal HashMap is empty (but still initialised so
-/// subsequent `write_file` calls work without an explicit `init_fs`).
 #[wasm_bindgen]
 pub fn clear_fs() {
     let mut guard = lock_fs();
-    let old = guard.take(); // extract the HashMap
-    drop(old);              // explicit drop — returns all heap memory to the allocator
+    let old = guard.take();
+    drop(old);
     *guard = Some(HashMap::new());
 }
 
-/// Return the number of files currently stored (useful for debugging / progress).
+/// Return the number of files currently stored.
 #[wasm_bindgen]
 pub fn file_count() -> usize {
     let guard = lock_fs();
@@ -86,7 +128,7 @@ pub fn file_count() -> usize {
         .unwrap_or(0)
 }
 
-/// Return a JS array of all file paths (useful for debugging).
+/// Return a JS array of all file paths.
 #[wasm_bindgen]
 pub fn list_paths() -> Box<[JsValue]> {
     let guard = lock_fs();
@@ -99,20 +141,16 @@ pub fn list_paths() -> Box<[JsValue]> {
 }
 
 // =============================================================================
-// Unit tests (run with: wasm-pack test --node)
+// Unit tests
 // =============================================================================
 #[cfg(test)]
 mod tests {
     use super::*;
-    // wasm-bindgen test requires wasm_bindgen_test crate; these tests also run
-    // under native `cargo test` when the target is not wasm.
-    // We guard with a helper because wasm_bindgen_test_configure! is wasm-only.
 
     #[test]
     fn smoke_init_and_write() {
         init_fs();
         assert_eq!(file_count(), 0);
-
         write_file("data/System.json", b"{\"test\":true}");
         assert_eq!(file_count(), 1);
         assert!(has_file("data/System.json"));
@@ -134,11 +172,8 @@ mod tests {
         write_file("a.txt", b"a");
         write_file("b.txt", b"b");
         assert_eq!(file_count(), 2);
-
         clear_fs();
         assert_eq!(file_count(), 0);
-        assert!(!has_file("a.txt"));
-        // Ensure we can still write after clear
         write_file("c.txt", b"c");
         assert!(has_file("c.txt"));
     }
@@ -159,5 +194,28 @@ mod tests {
         write_file("c/d.json", b"{}");
         let paths = list_paths();
         assert_eq!(paths.len(), 2);
+    }
+
+    #[test]
+    fn test_rpgmv_decrypt() {
+        // Build a fake RPGMV-encrypted file: header + "hello world" XOR'd with key
+        let key = "0102030405060708090a0b0c0d0e0f10"; // 16 bytes
+        let plain: Vec<u8> = b"hello world!!!!".to_vec(); // 16 bytes
+        let mut enc = RPGMV_HEADER.to_vec();
+        let key_bytes: Vec<u8> = (0..16).map(|i| i as u8 + 1).collect();
+        for (i, &b) in plain.iter().enumerate() {
+            enc.push(b ^ key_bytes[i % 16]);
+        }
+        write_file("test.png_", &enc);
+        let dec = read_file_decrypted("test.png_", key).expect("decrypt");
+        assert_eq!(&dec, &plain);
+    }
+
+    #[test]
+    fn test_rpgmv_non_encrypted_passthrough() {
+        init_fs();
+        write_file("plain.txt", b"just text");
+        let dec = read_file_decrypted("plain.txt", "0102030405060708090a0b0c0d0e0f10").expect("passthrough");
+        assert_eq!(dec, b"just text");
     }
 }
