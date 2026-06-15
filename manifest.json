@@ -1,0 +1,11 @@
+{
+  "name": "RPGMZ Player Pro",
+  "short_name": "RPGMZ Player",
+  "description": "RPG Maker MZ WASM VFS Game Runner",
+  "start_url": ".",
+  "display": "fullscreen",
+  "orientation": "any",
+  "background_color": "#1e1e1e",
+  "theme_color": "#1e1e1e",
+  "icons": []
+}

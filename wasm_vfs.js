@@ -74,6 +74,15 @@ const MIME_MAP = {
     '.pak':       'application/octet-stream',
     '.dll':       'application/octet-stream',
     '.exe':       'application/octet-stream',
+
+    // RPG Maker encrypted assets — map to their decrypted MIME types
+    '.rpgmvp':    'image/png',
+    '.rpgmvo':    'audio/ogg',
+    '.png_':      'image/png',
+    '.jpg_':      'image/jpeg',
+    '.jpeg_':     'image/jpeg',
+    '.m4a_':      'audio/mp4',
+    '.ogg_':      'audio/ogg',
 };
 
 /** Guess MIME type from path extension. Falls back to application/octet-stream. */
@@ -86,6 +95,96 @@ function guessMime(path) {
         }
     }
     return 'application/octet-stream';
+}
+
+// -----------------------------------------------------------------------------
+// RPG Maker encryption utilities
+// -----------------------------------------------------------------------------
+
+/**
+ * RPG Maker MV/MZ encrypted file header (16 bytes).
+ * Bytes 0-4: "RPGMV" magic
+ * Bytes 5-10: version info (0x0003, 0x0001 for MV/MZ)
+ * Bytes 11-15: reserved (zeros)
+ */
+const RPGMV_HEADER_BYTES = new Uint8Array([
+    0x52, 0x50, 0x47, 0x4D, 0x56, 0x00, 0x00, 0x00,
+    0x00, 0x03, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00
+]);
+
+/**
+ * Known PNG file header (first 16 bytes).
+ * Used to derive the XOR encryption key from an encrypted PNG image.
+ * Structure: 8-byte PNG signature + 4-byte IHDR length + 4-byte IHDR magic
+ */
+const PNG_SIGNATURE_16 = new Uint8Array([
+    0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,
+    0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52
+]);
+
+/**
+ * Check whether a buffer has the RPGMV encrypted file header.
+ * @param {Uint8Array} data
+ * @returns {boolean}
+ */
+function hasRpgmvHeader(data) {
+    if (!data || data.length < 16) return false;
+    for (let i = 0; i < 16; i++) {
+        if (data[i] !== RPGMV_HEADER_BYTES[i]) return false;
+    }
+    return true;
+}
+
+/**
+ * Derive the 16-byte XOR encryption key by comparing the encrypted PNG data
+ * against the known PNG file header.
+ *
+ * Works for both MV (.rpgmvp) and MZ (.png_) encrypted files.
+ *
+ * Algorithm:
+ *   key[i] = encrypted_block[i] XOR known_png_byte[i]   (for i = 0..15)
+ *
+ * @param {Uint8Array} encryptedData - Raw file bytes (with RPGMV header).
+ * @returns {string|null} 32-char hex key string, or null if derivation fails.
+ */
+function deriveKeyFromEncryptedImage(encryptedData) {
+    if (!hasRpgmvHeader(encryptedData)) return null;
+    if (encryptedData.length < 32) return null;
+
+    // The encrypted image data starts at offset 16 (after the RPGMV header).
+    // The first 16 bytes of the encrypted payload correspond to the first
+    // 16 bytes of the original PNG file, which are known.
+    const key = new Uint8Array(16);
+    for (let i = 0; i < 16; i++) {
+        key[i] = encryptedData[i + 16] ^ PNG_SIGNATURE_16[i];
+    }
+
+    // Sanity-check: a valid key shouldn't be all zeros
+    const allZero = key.every(b => b === 0);
+    if (allZero) return null;
+
+    // Convert to hex string
+    return Array.from(key).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+/**
+ * Decrypt RPGMV-encrypted file data.
+ *
+ * The file has a 16-byte RPGMV header followed by XOR-encrypted content.
+ * The same 16-byte key is applied to each 16-byte block (CBC-like without IV).
+ *
+ * @param {Uint8Array} data - Raw file bytes (with 16-byte RPGMV header).
+ * @param {string} hexKey - 32-char hex encryption key.
+ * @returns {Uint8Array} Decrypted content (without the RPGMV header).
+ */
+function decryptRpgmvData(data, hexKey) {
+    const keyBytes = hexKey.match(/.{2}/g).map(b => parseInt(b, 16));
+    const contentLen = data.length - 16;
+    const result = new Uint8Array(contentLen);
+    for (let i = 0; i < contentLen; i++) {
+        result[i] = data[i + 16] ^ keyBytes[i % 16];
+    }
+    return result;
 }
 
 // -----------------------------------------------------------------------------
@@ -214,7 +313,7 @@ export class WasmVFS {
      *        Optional progress callback.
      * @returns {Promise<{fileCount: number, basePath: string, indexHtmlPath: string}>}
      */
-    async loadZip(zipFile, onProgress) {
+    async loadZip(zipFile, onProgress, preKey) {
         this._assertReady();
 
         // Clear any previous game data.
@@ -223,14 +322,57 @@ export class WasmVFS {
         // Re-initialise fresh.
         init_fs();
 
+        // If a pre-known encryption key was provided, set it now so
+        // _deriveEncryptionKey skips auto-detection.
+        const _hasPreKey = !!(preKey && preKey.length >= 32);
+        if (_hasPreKey) {
+            this._encryptionInfo = {
+                hasImages: true, hasAudio: true,
+                key: preKey.toLowerCase().slice(0, 32)
+            };
+        }
+
+        // --- Known NW.js / Electron runtime files (useless for web play) ---
+        // These are filtered out to reduce IndexedDB storage and WASM memory usage.
+        const NWJS_SKIP_NAMES = new Set([
+            'nw.dll', 'node.dll', 'ffmpeg.dll', 'libegl.dll', 'libglesv2.dll',
+            'd3dcompiler_47.dll', 'nw_elf.dll', 'notification_helper.exe',
+            'game.exe', 'nw.exe', 'nwjc.exe',
+            'nw_100_percent.pak', 'nw_200_percent.pak', 'resources.pak',
+            'icudtl.dat', 'natives_blob.bin', 'snapshot_blob.bin',
+            'v8_context_snapshot.bin', 'debug.log',
+            '.ds_store', 'thumbs.db',
+        ]);
+        const NWJS_SKIP_DIRS = ['locales/', 'swiftshader/'];
+
+        function _isNwjsBinary(path) {
+            const lower = path.toLowerCase().replace(/\\/g, '/');
+            const name = lower.split('/').pop();
+            if (NWJS_SKIP_NAMES.has(name)) return true;
+            for (const dir of NWJS_SKIP_DIRS) {
+                if (lower.startsWith(dir) || lower.includes('/' + dir)) return true;
+            }
+            return false;
+        }
+
         // JSZip expects ArrayBuffer / Blob / etc.
         const zip = await JSZip.loadAsync(zipFile);
         const entries = [];
+        let skippedCount = 0;
         zip.forEach((relativePath, file) => {
             if (!file.dir) {
-                entries.push({ path: relativePath.replace(/\\/g, '/'), file });
+                const path = relativePath.replace(/\\/g, '/');
+                if (_isNwjsBinary(path)) {
+                    skippedCount++;
+                } else {
+                    entries.push({ path, file });
+                }
             }
         });
+
+        if (skippedCount > 0) {
+            console.log(`WasmVFS: skipped ${skippedCount} NW.js runtime file(s) — not needed for web play`);
+        }
 
         const total = entries.length;
         let current = 0;
@@ -251,6 +393,15 @@ export class WasmVFS {
         // --- auto-detect gameId from data/System.json ---
         this._detectGameId();
 
+        // --- auto-derive encryption key from encrypted images (if needed) ---
+        this._deriveEncryptionKey();
+
+        // Always re-patch System.json when we have a key, to ensure
+        // hasEncryptedImages=false (VFS decrypts transparently).
+        if (this._encryptionInfo && this._encryptionInfo.key) {
+            this._patchSystemJson(this._encryptionInfo.key);
+        }
+
         const idxPath = this._findIndexHtml();
         return {
             fileCount: file_count(),
@@ -262,13 +413,18 @@ export class WasmVFS {
     /**
      * Find the directory that contains index.html and set it as basePath.
      * Also handles auto-drill: if root has only one folder, enter it.
-     * Example: zip has "MyGame/www/index.html" → basePath = "MyGame/www"
-     * Example: zip has only "www/" at root → auto-drill → basePath = "www"
+     *
+     * Examples:
+     * - zip has "MyGame/www/index.html" → basePath = "MyGame/www"
+     * - zip has only "www/" at root   → auto-drill → basePath = "www"
+     * - zip has game files at root    → basePath = ""  (e.g. MZ direct export)
+     * - NW.js wrap with package.json "main": "www/index.html" → basePath includes www/
      */
     _detectBasePath() {
         this._basePath = '';
         const paths = list_paths();
-        // Auto-drill: if root contains only ONE folder (no files at root), enter it
+
+        // --- Auto-drill: if root contains only ONE folder (no files at root), enter it ---
         const rootEntries = new Set();
         for (const p of paths) {
             const slash = p.indexOf('/');
@@ -283,13 +439,54 @@ export class WasmVFS {
             }
         }
 
+        // --- Check package.json "main" for additional depth hints ---
+        // If package.json points to a subdirectory, we may need to go deeper.
+        for (const p of paths) {
+            const name = p.split('/').pop().toLowerCase();
+            if (name === 'package.json') {
+                try {
+                    const prefix = this._basePath ? (this._basePath + '/') : '';
+                    // Check if this package.json is at or near the current basePath root
+                    if (!prefix || p.startsWith(prefix) || prefix.startsWith(p.substring(0, p.lastIndexOf('/') + 1))) {
+                        const data = read_file(p);
+                        const json = JSON.parse(new TextDecoder('utf-8').decode(data));
+                        if (json.main && typeof json.main === 'string') {
+                            const mainRaw = json.main.replace(/\\/g, '/');
+                            // If main points to a subdirectory (e.g. "www/index.html"),
+                            // extend basePath to include that subdirectory.
+                            const mainSlash = mainRaw.lastIndexOf('/');
+                            if (mainSlash !== -1) {
+                                const mainDir = mainRaw.substring(0, mainSlash);
+                                const pkgDir = p.substring(0, p.lastIndexOf('/'));
+                                const candidate = pkgDir
+                                    ? (pkgDir + '/' + mainDir).replace(/\/+/g, '/')
+                                    : mainDir;
+                                // Only adopt if more specific than current basePath
+                                if (!this._basePath || candidate.length > this._basePath.length) {
+                                    // Verify the directory actually contains game data
+                                    const hasData = paths.some(fp =>
+                                        fp.startsWith(candidate + '/') &&
+                                        (fp.endsWith('data/System.json') || fp.endsWith('data/system.json'))
+                                    );
+                                    if (hasData) {
+                                        this._basePath = candidate;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } catch (_) { /* ignore */ }
+            }
+        }
+
+        // --- Use index.html location as final guide ---
         const idx = this._findIndexHtml();
         if (!idx) return;
         const lastSlash = idx.lastIndexOf('/');
         if (lastSlash !== -1) {
             const dir = idx.substring(0, lastSlash);
-            // If we already have a basePath from auto-drill, only use the index.html
-            // directory if it's more specific
+            // If we already have a basePath from auto-drill or package.json,
+            // only use the index.html directory if it's more specific
             if (!this._basePath || dir.startsWith(this._basePath)) {
                 this._basePath = dir;
             }
@@ -297,21 +494,82 @@ export class WasmVFS {
     }
 
     /**
-     * Locate "index.html" anywhere in the VFS.
+     * Locate the game's entry HTML anywhere in the VFS.
+     *
+     * Strategy (in order):
+     * 1. Check package.json "main" field (NW.js / Electron wraps).
+     *    E.g. "www/index.html" or "index.html".
+     * 2. Look for index.html files — prefer ones under a "www/" directory
+     *    (common for NW.js-wrapped RPG Maker MV games).
+     * 3. Fuzzy fallback: any .html / .htm file.
+     *
      * @returns {string|null}
      */
     _findIndexHtml() {
         const paths = list_paths();
+
+        // --- 1. package.json "main" field ---
+        // Collect package.json files, sorted shallowest-first (root-level first).
+        const pkgPaths = [];
+        for (const p of paths) {
+            if (p.split('/').pop().toLowerCase() === 'package.json') {
+                pkgPaths.push(p);
+            }
+        }
+        pkgPaths.sort((a, b) => a.length - b.length);  // root-level first
+
+        for (const pkgPath of pkgPaths) {
+            try {
+                const data = read_file(pkgPath);
+                const json = JSON.parse(new TextDecoder('utf-8').decode(data));
+                if (json.main && typeof json.main === 'string') {
+                    // Resolve "main" relative to the package.json directory
+                    const pkgDir = pkgPath.substring(0, pkgPath.lastIndexOf('/'));
+                    const raw = json.main.replace(/\\/g, '/');
+                    const mainPath = pkgDir
+                        ? (pkgDir + '/' + raw).replace(/\/+/g, '/')
+                        : raw;
+                    const mainLower = mainPath.toLowerCase();
+                    // Exact match first
+                    for (const p of paths) {
+                        if (p.replace(/\\/g, '/').toLowerCase() === mainLower) {
+                            return p;
+                        }
+                    }
+                    // Filename-only match (case-insensitive)
+                    const mainName = mainPath.split('/').pop().toLowerCase();
+                    for (const p of paths) {
+                        if (p.split('/').pop().toLowerCase() === mainName) {
+                            return p;
+                        }
+                    }
+                }
+            } catch (_) { /* ignore unreadable / non-JSON package.json */ }
+        }
+
+        // --- 2. Standard index.html search (prefer www/ subdir) ---
         let best = null;
+        let bestInWww = null;
         for (const p of paths) {
             const name = p.split('/').pop().toLowerCase();
             if (name === 'index.html') {
                 if (!best || p.length < best.length) {
                     best = p;
                 }
+                // Track index.html files whose parent dir is "www"
+                const parts = p.split('/');
+                if (parts.length >= 2) {
+                    const parentDir = parts[parts.length - 2].toLowerCase();
+                    if (parentDir === 'www' && (!bestInWww || p.length < bestInWww.length)) {
+                        bestInWww = p;
+                    }
+                }
             }
         }
-        // Fuzzy fallback: try case-insensitive, then any .html
+        // Prefer www/index.html when available (NW.js wrap pattern)
+        if (bestInWww) best = bestInWww;
+
+        // --- 3. Fuzzy fallback: any .html / .htm ---
         if (!best) {
             for (const p of paths) {
                 const name = p.split('/').pop().toLowerCase();
@@ -405,6 +663,143 @@ export class WasmVFS {
         } catch (_) { /* noop */ }
     }
 
+    /**
+     * If System.json didn't contain an encryptionKey, try to derive one
+     * from encrypted image files (.rpgmvp / .png_) inside the VFS.
+     *
+     * On success the derived key is injected back into System.json so the
+     * game engine's built-in Decrypter class can use it.
+     */
+    /**
+     * Set the encryption key from an external source (e.g., stored in IndexedDB).
+     * Call BEFORE bootGame() to skip the auto-derivation step.
+     * @param {string} hexKey - 32-char hex encryption key.
+     * @param {boolean} [hasImages=true]
+     * @param {boolean} [hasAudio=true]
+     */
+    setEncryptionKey(hexKey, hasImages, hasAudio) {
+        if (!hexKey || hexKey.length < 32) return false;
+        this._encryptionInfo = {
+            hasImages: hasImages !== false,
+            hasAudio: hasAudio !== false,
+            key: hexKey.toLowerCase().slice(0, 32)
+        };
+        // Also patch System.json so the engine finds it
+        this._patchSystemJson(this._encryptionInfo.key);
+        return true;
+    }
+
+    _deriveEncryptionKey() {
+        // Already have a key (from System.json or setEncryptionKey)? Done.
+        if (this._encryptionInfo && this._encryptionInfo.key) return;
+
+        const encryptedImages = this._findEncryptedImages();
+        if (encryptedImages.length === 0) return;
+
+        for (const imgPath of encryptedImages) {
+            const data = this.readRawFile(imgPath);
+            if (!data || data.length < 32) continue;
+
+            const derivedKey = deriveKeyFromEncryptedImage(data);
+            if (!derivedKey) continue;
+
+            console.log(`WasmVFS: derived encryption key from "${imgPath}"`);
+
+            this._encryptionInfo = {
+                hasImages: true,
+                hasAudio: true,  // MV/MZ use the same key for both
+                key: derivedKey
+            };
+
+            // Inject the key into System.json so the game engine finds it
+            this._patchSystemJson(derivedKey);
+            return;
+        }
+    }
+
+    /**
+     * Find all encrypted image files in the VFS.
+     * MV format: *.rpgmvp   MZ format: *.png_  *.jpg_
+     * @returns {string[]} VFS paths, sorted shortest-first.
+     */
+    _findEncryptedImages() {
+        const paths = list_paths();
+        const encrypted = [];
+        for (const p of paths) {
+            const lower = p.toLowerCase();
+            if (lower.endsWith('.rpgmvp') || lower.endsWith('.png_') || lower.endsWith('.jpg_')) {
+                encrypted.push(p);
+            }
+        }
+        // Prefer shorter paths (usually title/icon images)
+        encrypted.sort((a, b) => a.length - b.length);
+        return encrypted;
+    }
+
+    /**
+     * Write the derived encryption key back into data/System.json so the
+     * RPG Maker engine's Decrypter class can read it at boot time.
+     *
+     * @param {string} hexKey - 32-char hex encryption key.
+     */
+    _patchSystemJson(hexKey) {
+        const candidates = [
+            'data/System.json',
+            this._basePath ? this._basePath + '/data/System.json' : 'data/System.json'
+        ];
+        for (const sysPath of candidates) {
+            const raw = read_file(sysPath);
+            if (!raw) continue;
+            try {
+                const decoder = new TextDecoder('utf-8');
+                const system = JSON.parse(decoder.decode(raw));
+                // VFS decrypts transparently — engine should NOT try to decrypt.
+                // Setting hasEncryptedImages=false ensures engine requests regular
+                // filenames (e.g. Title.png). VFS maps these to encrypted files.
+                system.hasEncryptedImages = false;
+                system.hasEncryptedAudio = false;
+                system.encryptionKey = hexKey;
+                const encoded = new TextEncoder().encode(JSON.stringify(system));
+                write_file(sysPath, encoded);
+                console.log(`WasmVFS: patched "${sysPath}" — encryptedImages=false (VFS decrypts), key saved`);
+                return;
+            } catch (e) {
+                console.warn('WasmVFS: failed to patch System.json:', e);
+            }
+        }
+    }
+
+    /**
+     * Check whether a VFS path points to an RPGMV-encrypted file.
+     * @param {string} path - VFS path.
+     * @returns {boolean}
+     */
+    _isEncryptedPath(path) {
+        if (!this._encryptionInfo || !this._encryptionInfo.key) return false;
+        const lower = path.toLowerCase();
+        return lower.endsWith('.rpgmvp') || lower.endsWith('.rpgmvo') ||
+               lower.endsWith('.png_') || lower.endsWith('.jpg_') || lower.endsWith('.jpeg_') ||
+               lower.endsWith('.m4a_') || lower.endsWith('.ogg_');
+    }
+
+    /**
+     * Public method: decrypt an RPGMV-encrypted file and return the raw
+     * content bytes (without the 16-byte RPGMV header).
+     *
+     * Useful for thumbnail extraction and other host-level operations.
+     *
+     * @param {string} path - Requested path (e.g. "img/titles1/Title.png_").
+     * @returns {Uint8Array|null} Decrypted bytes, or null if not found / not encrypted.
+     */
+    decryptFile(path) {
+        if (!this._encryptionInfo || !this._encryptionInfo.key) return null;
+        const actual = this._resolvePath(path);
+        if (!actual) return null;
+        const data = read_file(actual);
+        if (!data || !hasRpgmvHeader(data)) return null;
+        return decryptRpgmvData(data, this._encryptionInfo.key);
+    }
+
     /** Return the detected gameId, or a sensible default. */
     get gameId() {
         return this._gameId || 'mv';
@@ -436,7 +831,45 @@ export class WasmVFS {
             if (has_file(alt)) return alt;
         }
         // 3. Fuzzy
-        return this.findFile(path);
+        const fuzzy = this.findFile(path);
+        if (fuzzy) return fuzzy;
+        // 4. Encrypted filename mapping (Title.png → Title.png_ / Title.rpgmvp)
+        //    Only when we have a known encryption key.
+        if (this._encryptionInfo && this._encryptionInfo.key) {
+            const lower = path.toLowerCase();
+            // Don't remap files that already have encrypted extensions
+            if (!lower.endsWith('.png_') && !lower.endsWith('.rpgmvp') &&
+                !lower.endsWith('.ogg_') && !lower.endsWith('.m4a_') && !lower.endsWith('.rpgmvo') &&
+                !lower.endsWith('.jpg_') && !lower.endsWith('.jpeg_')) {
+                const tryExts = [path + '_'];
+                if (/\.(png|jpg|jpeg)$/i.test(path)) tryExts.push(path.replace(/\.(png|jpg|jpeg)$/i, '.rpgmvp'));
+                if (/\.(ogg|m4a)$/i.test(path)) tryExts.push(path.replace(/\.(ogg|m4a)$/i, '.rpgmvo'));
+                for (const tp of tryExts) {
+                    if (has_file(tp)) return tp;
+                    if (this._basePath) {
+                        const altTry = (this._basePath + '/' + tp).replace(/\/+/g, '/');
+                        if (has_file(altTry)) return altTry;
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Read file data, transparently decrypting encrypted files.
+     * @param {string} path - VFS path (resolved via _resolvePath).
+     * @param {boolean} [raw=false] - If true, return raw bytes without decryption.
+     * @returns {Uint8Array|null}
+     */
+    _readFileData(path, raw) {
+        const data = read_file(path);
+        if (!data || raw) return data;
+        if (this._encryptionInfo && this._encryptionInfo.key &&
+            this._isEncryptedPath(path) && hasRpgmvHeader(data)) {
+            return decryptRpgmvData(data, this._encryptionInfo.key);
+        }
+        return data;
     }
 
     // =========================================================================
@@ -456,9 +889,18 @@ export class WasmVFS {
         if (!actual) {
             return new Response(null, { status: 404, statusText: 'Not Found in VFS' });
         }
-        const data = read_file(actual);
+        let data = this._readFileData(actual);
+        let mime = mimeType || guessMime(internalPath);
 
-        const mime = mimeType || guessMime(internalPath);
+        // Fix MIME for decrypted content (strip encrypted extension)
+        if (data && this._encryptionInfo && this._encryptionInfo.key && this._isEncryptedPath(actual)) {
+            const lo = actual.toLowerCase();
+            if (lo.endsWith('.png_') || lo.endsWith('.rpgmvp')) mime = 'image/png';
+            else if (lo.endsWith('.ogg_') || lo.endsWith('.rpgmvo')) mime = 'audio/ogg';
+            else if (lo.endsWith('.m4a_')) mime = 'audio/mp4';
+            else if (lo.endsWith('.jpg_') || lo.endsWith('.jpeg_')) mime = 'image/jpeg';
+        }
+
         return new Response(data, {
             status: 200,
             headers: {
@@ -500,10 +942,19 @@ export class WasmVFS {
             return this._imageBlobCache.get(actual);
         }
 
-        const data = read_file(actual);
+        let data = this._readFileData(actual);
         if (!data) return null;
 
-        const mime = mimeType || guessMime(internalPath);
+        let mime = mimeType || guessMime(internalPath);
+        // Fix MIME for decrypted content
+        if (this._encryptionInfo && this._encryptionInfo.key && this._isEncryptedPath(actual)) {
+            const lo = actual.toLowerCase();
+            if (lo.endsWith('.png_') || lo.endsWith('.rpgmvp')) mime = 'image/png';
+            else if (lo.endsWith('.ogg_') || lo.endsWith('.rpgmvo')) mime = 'audio/ogg';
+            else if (lo.endsWith('.m4a_')) mime = 'audio/mp4';
+            else if (lo.endsWith('.jpg_') || lo.endsWith('.jpeg_')) mime = 'image/jpeg';
+        }
+
         const blob = new Blob([data], { type: mime });
         const url = URL.createObjectURL(blob);
         this._activeBlobUrls.add(url);
@@ -768,7 +1219,7 @@ export class WasmVFS {
      * @returns {string|null}
      */
     readTextFile(path, encoding) {
-        const data = read_file(path);
+        const data = this.readRawFile(path);
         if (!data) return null;
         // RPG Maker MZ uses UTF-8 by default, but older/Japanese games may
         // use Shift-JIS.  Try the requested encoding first, then UTF-8,
@@ -809,6 +1260,6 @@ export class WasmVFS {
      */
     readRawFile(path) {
         const actual = this._resolvePath(path);
-        return actual ? read_file(actual) : null;
+        return actual ? this._readFileData(actual) : null;
     }
 } // end class WasmVFS

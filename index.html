@@ -3,6 +3,11 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#1e1e1e">
+<link rel="manifest" href="manifest.json">
 <title>RPGMZ Player Pro — WASM VFS Runner</title>
 <script src="libs/jszip.min.js"></script>
 <script src="libs/localforage.min.js"></script>
@@ -43,8 +48,13 @@ header .actions{display:flex;gap:4px;align-items:center;margin-left:auto;flex-sh
 
 /* Fullscreen: header slides up out of view */
 body.fs-active header{transform:translateY(-100%);}
+/* Mobile pseudo-fullscreen: truly fills the screen */
+body.pseudo-fs{position:fixed;width:100vw;height:100vh;height:100dvh;overflow:hidden;}
+body.pseudo-fs header{transform:translateY(-100%);}
+body.pseudo-fs #game-view{position:fixed;inset:0;z-index:1;}
+body.pseudo-fs .floating-btn{opacity:0.35;}
 /* Tap near top edge to reveal header */
-body.fs-active .fs-hotzone{display:block;}
+body.fs-active .fs-hotzone,body.pseudo-fs .fs-hotzone{display:block;}
 .fs-hotzone{display:none;position:fixed;top:0;left:0;right:0;height:8px;z-index:200;}
 
 /* Mobile header: single row, icon-only */
@@ -207,29 +217,70 @@ button:disabled{opacity:.4;cursor:not-allowed;transform:none;}
 .anki-dot.connected{background:var(--green);animation:pulse 2s infinite;}
 
 /* ---- Library Cards ---- */
-#library-container{flex:1;overflow-y:auto;padding:16px;display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));align-content:start;}
+#library-container{flex:1;overflow-y:auto;padding:16px;display:grid;gap:14px;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));align-content:start;}
 #library-container.list-mode{display:flex;flex-direction:column;gap:8px;}
 #library-container.list-mode .game-card{display:flex;flex-direction:row;align-items:center;gap:14px;padding:10px 14px;}
-#library-container.list-mode .game-card .card-thumb{width:80px;height:48px;flex-shrink:0;}
-#library-container.list-mode .game-card .card-info{flex:1;display:flex;align-items:center;gap:16px;}
+#library-container.list-mode .game-card .card-thumb{width:80px;height:48px;flex-shrink:0;border-radius:4px;}
+#library-container.list-mode .game-card .card-info{flex:1;display:flex;align-items:center;gap:16px;min-width:0;}
 #library-container.list-mode .game-card .card-info .card-meta{display:flex;gap:16px;font-size:12px;color:var(--mute);}
-#library-container.list-mode .game-card .card-actions{flex-shrink:0;}
-.game-card{background:var(--panel);border:1px solid var(--border);border-radius:6px;overflow:hidden;cursor:pointer;transition:border-color .15s,transform .1s;display:flex;flex-direction:column;}
-.game-card:hover{border-color:var(--accent);transform:translateY(-2px);box-shadow:0 4px 16px rgba(0,0,0,.3);}
-.game-card .card-thumb{width:100%;height:130px;background:var(--bg);display:flex;align-items:center;justify-content:center;overflow:hidden;position:relative;}
+#library-container.list-mode .game-card .card-actions{flex-shrink:0;padding:0;border-top:none;}
+.game-card{background:var(--panel);border:1px solid var(--border);border-radius:8px;overflow:hidden;cursor:pointer;transition:border-color .15s,transform .15s,box-shadow .15s;display:flex;flex-direction:column;position:relative;}
+.game-card:hover{border-color:var(--accent);transform:translateY(-2px);box-shadow:0 6px 20px rgba(0,0,0,.35);}
+.game-card .card-thumb{width:100%;height:140px;background:var(--bg);display:flex;align-items:center;justify-content:center;overflow:hidden;position:relative;}
 .game-card .card-thumb img{width:100%;height:100%;object-fit:cover;}
-.game-card .card-thumb .no-thumb{font-size:44px;opacity:.25;}
-.game-card .card-info{padding:10px 12px;flex:1;}
-.game-card .card-info .card-name{font-size:14px;font-weight:700;margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.game-card .card-info .card-meta{font-size:11px;color:var(--mute);line-height:1.5;}
-.game-card .card-actions{display:flex;gap:4px;padding:0 12px 10px;}
-.game-card .card-actions button{flex:1;padding:5px 0;font-size:11px;border-radius:4px;cursor:pointer;background:var(--card);color:var(--text);border:1px solid var(--border);}
-.game-card .card-actions button:hover{background:var(--accent);color:#fff;}
-.game-card .card-actions button.btn-del{background:#522;color:#fbb;}
-.game-card .card-actions button.btn-del:hover{background:#833;}
+.game-card .card-thumb .no-thumb{font-size:48px;opacity:.2;transition:opacity .2s;}
+.game-card:hover .card-thumb .no-thumb{opacity:.35;}
+.game-card .card-badge{position:absolute;top:8px;right:8px;font-size:9px;padding:2px 7px;border-radius:10px;background:rgba(0,0,0,.65);color:#ff9;backdrop-filter:blur(4px);pointer-events:none;z-index:2;}
+.game-card .card-info{padding:12px 14px 8px;flex:1;min-width:0;}
+.game-card .card-info .card-name{font-size:14px;font-weight:700;margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--text);}
+.game-card .card-info .card-meta{font-size:11px;color:var(--mute);line-height:1.6;}
+.game-card .card-actions{display:flex;gap:6px;padding:0 12px 12px;border-top:none;}
+.game-card .card-actions button{flex:1;padding:6px 4px;font-size:11px;border-radius:6px;cursor:pointer;border:1px solid var(--border);transition:all .15s;font-family:inherit;font-weight:500;}
+.game-card .card-actions button.btn-play{background:var(--accent);color:#fff;border-color:var(--accent);}
+.game-card .card-actions button.btn-play:hover{background:var(--accent-hover);border-color:var(--accent-hover);}
+.game-card .card-actions button.btn-edit{background:var(--card);color:var(--text);flex:0 0 auto;padding:6px 8px;font-size:12px;min-width:32px;}
+.game-card .card-actions button.btn-edit:hover{background:#444;color:#fff;border-color:var(--accent);}
+.game-card .card-actions button.btn-del{background:transparent;color:#f99;border-color:transparent;flex:0 0 auto;padding:6px 8px;font-size:12px;min-width:32px;}
+.game-card .card-actions button.btn-del:hover{background:#633;color:#fbb;border-color:#633;}
+.game-card .card-actions button.btn-key{background:transparent;color:#ff9;border-color:transparent;flex:0 0 auto;padding:6px 8px;font-size:12px;min-width:32px;}
+.game-card .card-actions button.btn-key:hover{background:#440;color:#ff0;border-color:#660;}
+/* Inline edit input */
+.game-card .card-info .card-name-edit{font-size:14px;font-weight:700;padding:3px 6px;border:1px solid var(--accent);border-radius:4px;background:var(--bg);color:#fff;width:100%;outline:none;font-family:inherit;}
 #empty-library{text-align:center;color:var(--mute);padding:80px 20px;grid-column:1/-1;}
-#empty-library .empty-icon{font-size:64px;margin-bottom:16px;opacity:.3;}
+#empty-library .empty-icon{font-size:64px;margin-bottom:16px;opacity:.3;transition:opacity .3s;}
+#empty-library .empty-icon:hover{opacity:.5;}
 #empty-library p{font-size:14px;margin-bottom:8px;}
+
+/* Mobile: tighter grid, smaller cards */
+@media(max-width:600px){
+  #library-container{padding:10px;gap:10px;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));}
+  .game-card .card-thumb{height:100px;}
+  .game-card .card-thumb .no-thumb{font-size:32px;}
+  .game-card .card-info{padding:8px 10px 4px;}
+  .game-card .card-info .card-name{font-size:13px;}
+  .game-card .card-info .card-meta{font-size:10px;line-height:1.4;}
+  .game-card .card-actions{padding:0 8px 8px;gap:4px;}
+  .game-card .card-actions button{padding:5px 3px;font-size:10px;border-radius:4px;}
+  .game-card .card-actions button.btn-edit,
+  .game-card .card-actions button.btn-del,
+  .game-card .card-actions button.btn-key{min-width:28px;padding:5px 6px;font-size:11px;}
+  #library-container.list-mode .game-card{padding:8px 10px;gap:10px;}
+  #library-container.list-mode .game-card .card-thumb{width:60px;height:36px;}
+  #library-container.list-mode .game-card .card-info{gap:10px;}
+  #library-container.list-mode .game-card .card-info .card-meta{font-size:10px;gap:8px;}
+}
+@media(max-width:380px){
+  #library-container{padding:8px;gap:8px;grid-template-columns:1fr 1fr;}
+  .game-card .card-thumb{height:80px;}
+  .game-card .card-info{padding:6px 8px 2px;}
+  .game-card .card-info .card-name{font-size:12px;}
+  .game-card .card-actions{padding:0 6px 6px;gap:3px;flex-wrap:wrap;}
+  .game-card .card-actions button.btn-play{flex:1 1 100%;min-width:0;}
+  .game-card .card-actions button.btn-edit,
+  .game-card .card-actions button.btn-del,
+  .game-card .card-actions button.btn-key{flex:0 0 auto;}
+  #library-container.list-mode .game-card .card-actions{gap:3px;}
+}
 
 /* ---- Dynamic Content ---- */
 .save-entry{display:flex;align-items:center;gap:6px;padding:5px 8px;background:var(--card);border-radius:4px;font-size:12px;margin-bottom:2px;}
@@ -366,8 +417,7 @@ input[type=range].opacity-slider::-webkit-slider-thumb{-webkit-appearance:none;w
   <div class="actions">
     <!-- Library: add game + view toggles -->
     <button id="btn-add-game" class="icon-btn" title="添加游戏" style="background:var(--accent);color:#fff;">＋</button>
-    <button id="btn-view-grid" class="active icon-btn secondary" title="九宫格视图">▦</button>
-    <button id="btn-view-list" class="icon-btn secondary" title="列表视图">☰</button>
+    <button id="btn-view-toggle" class="icon-btn secondary" title="切换视图: 九宫格/列表">▦</button>
 
     <!-- Game: action buttons -->
     <button class="icon-btn game-upload-only" id="btn-settings" title="设置面板" style="display:none;">⚙</button>
@@ -543,7 +593,7 @@ input[type=range].opacity-slider::-webkit-slider-thumb{-webkit-appearance:none;w
           </label>
           <button id="btn-rescan-saves" class="secondary" style="flex:1;font-size:11px;" title="强制游戏重新扫描存档">🔄 重新检测</button>
         </div>
-        <div id="save-list" style="font-size:12px;color:var(--mute);min-height:36px;">暂无存档</div>
+        <div id="save-list" style="font-size:12px;color:var(--mute);min-height:36px;max-height:200px;overflow-y:auto;">暂无存档</div>
       </div>
 
       <div class="panel">
@@ -663,7 +713,7 @@ const uploadSaveSide=$('#upload-save-side');
 const homeView=$('#home-view'), gameView=$('#game-view'), libraryContainer=$('#library-container');
 const uploadZipHome=$('#upload-zip-home'), btnAddGame=$('#btn-add-game');
 btnAddGame.addEventListener('click',()=>uploadZipHome.click());
-const btnViewGrid=$('#btn-view-grid'), btnViewList=$('#btn-view-list');
+const btnViewToggle=$('#btn-view-toggle');
 const homeProgressWrap=$('#home-progress-wrap'), homeProgressBar=$('#home-progress-bar'), homeProgressText=$('#home-progress-text');
 const loadingOverlay=$('#loading-overlay'), loadingText=$('#loading-text'), loadingSub=$('#loading-sub'), loadingBar=$('#loading-bar');
 let _loadingGame=false; // prevent double-click launch
@@ -852,15 +902,18 @@ function setLibraryView(mode){
     libraryViewMode=mode;
     if(mode==='grid'){
         libraryContainer.classList.remove('list-mode');
-        btnViewGrid.classList.add('active');btnViewList.classList.remove('active');
+        btnViewToggle.textContent='▦';
+        btnViewToggle.title='切换视图: 列表';
     }else{
         libraryContainer.classList.add('list-mode');
-        btnViewList.classList.add('active');btnViewGrid.classList.remove('active');
+        btnViewToggle.textContent='☰';
+        btnViewToggle.title='切换视图: 九宫格';
     }
     localStorage.setItem('rm-vfs-library-view',mode);
 }
-btnViewGrid.addEventListener('click',()=>setLibraryView('grid'));
-btnViewList.addEventListener('click',()=>setLibraryView('list'));
+btnViewToggle.addEventListener('click',()=>{
+    setLibraryView(libraryViewMode==='grid'?'list':'grid');
+});
 setLibraryView(localStorage.getItem('rm-vfs-library-view')||'grid');
 
 // =========================================================================
@@ -879,18 +932,25 @@ async function renderLibrary(){
         const name=g.name||'未命名游戏';
         const fileCount=g.fileCount||0;
         const zipSize=formatSize(g.zipSize||0);
-        const thumb=g.thumbnail?`<img src="${g.thumbnail}" alt="">`:`<span class="no-thumb">🎮</span>`;
+        const thumb=g.thumbnail?`<img src="${g.thumbnail}" alt="" loading="lazy">`:`<span class="no-thumb">🎮</span>`;
         const added=new Date(g.addedAt||0).toLocaleDateString();
         const played=g.lastPlayed?new Date(g.lastPlayed).toLocaleDateString():'未玩过';
+        const encBadge=g.hasEncryption?'<span class="card-badge">🔒 加密</span>':'';
+        const hasKey=g.encryptionKey&&g.encryptionKey.length>=32;
+        const keyBtn=g.hasEncryption
+            ?`<button class="btn-key" title="${hasKey?'密钥: '+g.encryptionKey.slice(0,8)+'…':'提取/设置密钥'}">${hasKey?'🔑':'🔓'}</button>`
+            :'';
         return `<div class="game-card" data-id="${g.id}">
-            <div class="card-thumb">${thumb}</div>
+            <div class="card-thumb">${thumb}${encBadge}</div>
             <div class="card-info">
                 <div class="card-name" title="${name}">${name}</div>
-                <div class="card-meta">${fileCount} 文件 · ${zipSize} · 添加于 ${added}<br>最后游玩: ${played}</div>
+                <div class="card-meta">${fileCount} 文件 · ${zipSize}<br>添加: ${added} · 游玩: ${played}</div>
             </div>
             <div class="card-actions">
                 <button class="btn-play">▶ 开始</button>
-                <button class="btn-del">🗑 删除</button>
+                ${keyBtn}
+                <button class="btn-edit" title="重命名">✏️</button>
+                <button class="btn-del" title="删除">🗑</button>
             </div>
         </div>`;
     }).join('');
@@ -912,6 +972,80 @@ async function renderLibrary(){
                 renderLibrary();
                 toast('游戏已删除');
             }
+        });
+    });
+    libraryContainer.querySelectorAll('.btn-key').forEach(btn=>{
+        btn.addEventListener('click',async e=>{
+            e.stopPropagation();
+            const card=btn.closest('.game-card');
+            const id=card.dataset.id;
+            const game=await GameLibrary.get(id);
+            if(!game) return;
+            const currentKey=game.encryptionKey||'';
+            const action=confirm(
+                '🔑 加密密钥管理\n\n'+
+                (currentKey?'当前密钥: '+currentKey.slice(0,16)+'…\n':'⚠ 未设置密钥\n')+
+                '━━━━━━━━━━━━━━━━━━\n'+
+                '点「确定」手动输入密钥\n'+
+                '点「取消」关闭'
+            );
+            if(!action) return;
+            const keyPrompt=prompt(
+                '🔑 加密密钥 (32位十六进制)\n\n'+
+                (currentKey?'当前: '+currentKey.slice(0,16)+'…\n\n':'')+
+                '输入32位十六进制密钥，或:\n'+
+                '• 留空 → 清除密钥（下次启动重新提取）\n'+
+                '• 输入 auto → 下次启动自动提取\n'+
+                '• 输入新密钥 → 保存使用',
+                currentKey||''
+            );
+            if(keyPrompt===null) return;
+            const trimmed=keyPrompt.trim();
+            if(trimmed===''||trimmed.toLowerCase()==='auto'){
+                await GameLibrary.update(id,{encryptionKey:'',hasEncryption:!!currentKey||game.hasEncryption});
+                toast(trimmed===''?'密钥已清除，下次启动自动提取':'✅ 下次启动将自动提取密钥');
+            }else{
+                const cleanKey=trimmed.toLowerCase().replace(/[^0-9a-f]/g,'');
+                if(cleanKey.length!==32){
+                    toast('⚠️ 密钥须为32位十六进制字符（当前'+cleanKey.length+'位）',3000);
+                    return;
+                }
+                await GameLibrary.update(id,{encryptionKey:cleanKey,hasEncryption:true});
+                toast('✅ 密钥已保存: '+cleanKey.slice(0,8)+'…');
+            }
+            renderLibrary();
+        });
+    });
+    libraryContainer.querySelectorAll('.btn-edit').forEach(btn=>{
+        btn.addEventListener('click',async e=>{
+            e.stopPropagation();
+            const card=btn.closest('.game-card');
+            const id=card.dataset.id;
+            const nameEl=card.querySelector('.card-name');
+            const oldName=nameEl.textContent;
+            // Replace name with inline input
+            const input=document.createElement('input');
+            input.type='text';
+            input.className='card-name-edit';
+            input.value=oldName;
+            input.maxLength=80;
+            nameEl.replaceWith(input);
+            input.focus();
+            input.select();
+            const saveRename=async()=>{
+                const newName=input.value.trim()||oldName;
+                input.replaceWith(nameEl);
+                if(newName!==oldName){
+                    nameEl.textContent=newName;
+                    nameEl.title=newName;
+                    await GameLibrary.update(id,{name:newName});
+                    toast('已重命名为「'+newName+'」');
+                }
+            };
+            input.addEventListener('blur',saveRename);
+            input.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();input.blur();}if(e.key==='Escape'){input.value=oldName;input.blur();}});
+            // Stop card click from launching game while editing
+            input.addEventListener('click',e=>e.stopPropagation());
         });
     });
     libraryContainer.querySelectorAll('.game-card').forEach(card=>{
@@ -949,41 +1083,34 @@ async function addGameToLibrary(file,onLibProgress){
         // Capture thumbnail from title screen if possible
         let thumbnail='';
         try{
-            // Try to find title image
-            const titlePng=vfs.readRawFile('img/titles1/Title.png_');
-            if(titlePng){
-                // Decrypt if needed
-                if(vfs.encryptionInfo){
-                    // Use game's decryption
-                    const rpgmvHeader=new Uint8Array(titlePng.slice(0,16));
-                    const headerHex=Array.from(rpgmvHeader).map(x=>x.toString(16)).join(',');
-                    if(headerHex==='52,50,47,4d,56,0,0,0,0,3,1,0,0,0,0,0'){
-                        const body=titlePng.slice(16);
-                        const view=new DataView(body);
-                        const key=vfs.encryptionInfo.key.match(/.{2}/g);
-                        for(let i=0;i<16;i++) view.setUint8(i,view.getUint8(i)^parseInt(key[i],16));
-                        const blob=new Blob([body],{type:'image/png'});
-                        thumbnail=await new Promise(r=>{
-                            const reader=new FileReader();
-                            reader.onload=()=>r(reader.result);
-                            reader.readAsDataURL(blob);
-                        });
-                    }
-                }else{
-                    const blob=new Blob([titlePng],{type:'image/png'});
-                    thumbnail=await new Promise(r=>{
-                        const reader=new FileReader();
-                        reader.onload=()=>r(reader.result);
-                        reader.readAsDataURL(blob);
-                    });
+            // Try multiple title image paths (MZ: .png_, MV: .rpgmvp, plain: .png)
+            const titleCandidates=[
+                'img/titles1/Title.png_','img/titles1/Title.rpgmvp',
+                'img/titles1/Title.png','img/titles/Title.png'
+            ];
+            for(const tc of titleCandidates){
+                // Try decrypted first, then raw
+                let imgData=vfs.decryptFile(tc);
+                if(imgData){
+                    const blob=new Blob([imgData],{type:'image/png'});
+                    thumbnail=await new Promise(r=>{const reader=new FileReader();reader.onload=()=>r(reader.result);reader.readAsDataURL(blob);});
+                    break;
+                }
+                imgData=vfs.readRawFile(tc);
+                if(imgData){
+                    const blob=new Blob([imgData],{type:'image/png'});
+                    thumbnail=await new Promise(r=>{const reader=new FileReader();reader.onload=()=>r(reader.result);reader.readAsDataURL(blob);});
+                    break;
                 }
             }
         }catch(e){/* no thumbnail — ok */}
-        // Store in library
+        // Store in library (include encryption key for persistence)
+        const encKey=vfs.encryptionInfo?vfs.encryptionInfo.key:'';
         await GameLibrary.add(id,{
             name, fileCount:meta.fileCount, gameId:vfs.gameId,
             zipSize:zipData.byteLength, thumbnail,
-            hasEncryption:!!vfs.encryptionInfo
+            hasEncryption:!!vfs.encryptionInfo,
+            encryptionKey:encKey
         },zipData);
         console.log('[addGameToLibrary] stored OK, rendering');
         setProgress(100);
@@ -1020,11 +1147,16 @@ async function loadGameFromLibrary(id){
     setStatus('正在加载…');setProgress(10);
     try{
         _skipAutoAdd=true; // prevent duplicate entry from loadZip override
+        // Pass stored encryption key so auto-detection is skipped when key is known
+        const preKey=(game.encryptionKey&&game.encryptionKey.length>=32)?game.encryptionKey:null;
         currentGameMeta=await vfs.loadZip(new Blob([game.zipData]),(cur,total,entryName)=>{
             const pct=10+Math.round((cur/total)*70);
             setProgress(pct);loadingBar.style.width=pct+'%';
             if(entryName) loadingSub.textContent=entryName;
-        });
+        },preKey);
+        if(preKey){
+            console.log('[loadGame] Using stored encryption key: '+preKey.slice(0,8)+'…');
+        }
         gameLoaded=true;
         loadingBar.style.width='85%';
         loadingSub.textContent='初始化引擎…';
@@ -1139,26 +1271,31 @@ vfs.loadZip=async function(zipFile,onProgress){
             // Capture thumbnail
             let thumbnail='';
             try{
-                if(vfs.encryptionInfo){
-                    const titlePng=vfs.readRawFile('img/titles1/Title.png_');
-                    if(titlePng){
-                        const rpgmvHeader=new Uint8Array(titlePng.slice(0,16));
-                        const headerHex=Array.from(rpgmvHeader).map(x=>x.toString(16)).join(',');
-                        if(headerHex==='52,50,47,4d,56,0,0,0,0,3,1,0,0,0,0,0'){
-                            const body=titlePng.slice(16);
-                            const view=new DataView(body);
-                            const key=vfs.encryptionInfo.key.match(/.{2}/g);
-                            for(let i=0;i<16;i++) view.setUint8(i,view.getUint8(i)^parseInt(key[i],16));
-                            const blob=new Blob([body],{type:'image/png'});
-                            thumbnail=await new Promise(r=>{const reader=new FileReader();reader.onload=()=>r(reader.result);reader.readAsDataURL(blob);});
-                        }
+                const titleCandidates=[
+                    'img/titles1/Title.png_','img/titles1/Title.rpgmvp',
+                    'img/titles1/Title.png','img/titles/Title.png'
+                ];
+                for(const tc of titleCandidates){
+                    let imgData=vfs.decryptFile(tc);
+                    if(imgData){
+                        const blob=new Blob([imgData],{type:'image/png'});
+                        thumbnail=await new Promise(r=>{const reader=new FileReader();reader.onload=()=>r(reader.result);reader.readAsDataURL(blob);});
+                        break;
+                    }
+                    imgData=vfs.readRawFile(tc);
+                    if(imgData){
+                        const blob=new Blob([imgData],{type:'image/png'});
+                        thumbnail=await new Promise(r=>{const reader=new FileReader();reader.onload=()=>r(reader.result);reader.readAsDataURL(blob);});
+                        break;
                     }
                 }
             }catch(e){}
+            const encKey2=vfs.encryptionInfo?vfs.encryptionInfo.key:'';
             await GameLibrary.add(id,{
                 name,fileCount:result.fileCount,gameId:vfs.gameId,
                 zipSize:zipData.byteLength,thumbnail,
-                hasEncryption:!!vfs.encryptionInfo
+                hasEncryption:!!vfs.encryptionInfo,
+                encryptionKey:encKey2
             },zipData);
             currentLibraryGame={id,name,zipData};
             renderLibrary();
@@ -2102,6 +2239,18 @@ window.fetch=function(input,init){
     var normPath=normalizePath(url);
     var vfs=getVfs();
     if(vfs&&vfs.fileExists(normPath)){var r=vfs.createResponse(normPath);if(r&&r.status===200) return Promise.resolve(r);}
+    // Try encrypted filename variants
+    if(vfs){
+        var _lo=normPath.toLowerCase();
+        if(!_lo.endsWith('.png_')&&!_lo.endsWith('.rpgmvp')&&!_lo.endsWith('.ogg_')&&!_lo.endsWith('.m4a_')){
+            var _tp=[normPath+'_'];
+            if(/\.(png|jpg|jpeg)$/i.test(normPath)) _tp.push(normPath.replace(/\.(png|jpg|jpeg)$/i,'.rpgmvp'));
+            if(/\.(ogg|m4a)$/i.test(normPath)) _tp.push(normPath.replace(/\.(ogg|m4a)$/i,'.rpgmvo'));
+            for(var _ti=0;_ti<_tp.length;_ti++){
+                if(vfs.fileExists(_tp[_ti])){var r=vfs.createResponse(_tp[_ti]);if(r&&r.status===200) return Promise.resolve(r);}
+            }
+        }
+    }
     return _origFetch.apply(this,arguments);
 };
 // XHR interception
@@ -2114,7 +2263,18 @@ window.XMLHttpRequest=function(){
         _method=method.toUpperCase(); _url=url;
         var normPath=normalizePath(url);
         var vfs=getVfs();
-        _intercepted=!!(vfs&&vfs.fileExists(normPath));
+        if(vfs&&vfs.fileExists(normPath)){_intercepted=true;return;}
+        // Try encrypted filename variants (.png_ / .rpgmvp / .ogg_)
+        var _lo=normPath.toLowerCase();
+        if(vfs&&!_lo.endsWith('.png_')&&!_lo.endsWith('.rpgmvp')&&!_lo.endsWith('.ogg_')&&!_lo.endsWith('.m4a_')){
+            var _tp=[normPath+'_'];
+            if(/\.(png|jpg|jpeg)$/i.test(normPath)) _tp.push(normPath.replace(/\.(png|jpg|jpeg)$/i,'.rpgmvp'));
+            if(/\.(ogg|m4a)$/i.test(normPath)) _tp.push(normPath.replace(/\.(ogg|m4a)$/i,'.rpgmvo'));
+            for(var _ti=0;_ti<_tp.length;_ti++){
+                if(vfs.fileExists(_tp[_ti])){_intercepted=true;_url=_tp[_ti];return;}
+            }
+        }
+        _intercepted=false;
         if(!_intercepted) return _open.call(this,method,url,async,user,pass);
     };
     xhr.send=function(body){
@@ -2136,7 +2296,9 @@ window.XMLHttpRequest=function(){
             try{var json=JSON.parse(decoder2.decode(data));Object.defineProperty(xhr,'response',{get:function(){return json;},configurable:true});}
             catch(e){Object.defineProperty(xhr,'response',{get:function(){return null;},configurable:true});}
         }else if(xhr.responseType==='arraybuffer'){
-            Object.defineProperty(xhr,'response',{get:function(){return data.buffer;},configurable:true});
+            // Safe copy: data.buffer may be larger if data is a Uint8Array view
+            var buf=data.buffer.slice(data.byteOffset,data.byteOffset+data.byteLength);
+            Object.defineProperty(xhr,'response',{get:function(){return buf;},configurable:true});
         }else{
             Object.defineProperty(xhr,'response',{get:function(){return data;},configurable:true});
         }
@@ -2162,22 +2324,37 @@ var _emptyPng='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcS
             set:function(value){
                 var normPath=normalizePath(String(value));
                 var vfs=getVfs();
-                if(vfs&&vfs.fileExists(normPath)){
-                    var blobUrl=vfs.createMediaUrl(normPath);
-                    if(blobUrl){
-                        this.__vfsBlobUrl=blobUrl;
-                        var self=this;
-                        var origOnload=self.onload,origOnerror=self.onerror;
-                        self.onload=function(e){
-                            if(self.__vfsBlobUrl){vfs.revokeMediaUrl(self.__vfsBlobUrl);self.__vfsBlobUrl=null;}
-                            if(typeof origOnload==='function') origOnload.call(self,e);
-                        };
-                        self.onerror=function(e){
-                            if(self.__vfsBlobUrl){vfs.revokeMediaUrl(self.__vfsBlobUrl);self.__vfsBlobUrl=null;}
-                            if(typeof origOnerror==='function') origOnerror.call(self,e);
-                        };
-                        _set.call(this,blobUrl);return;
+                // Try encrypted filename variants when the exact path isn't found
+                // (engine may request "Title.png" but VFS only has "Title.png_")
+                var tryPaths=[normPath];
+                if(vfs&&!vfs.fileExists(normPath)){
+                    var lower=normPath.toLowerCase();
+                    if(!lower.endsWith('.png_')&&!lower.endsWith('.rpgmvp')&&!lower.endsWith('.ogg_')&&!lower.endsWith('.m4a_')){
+                        tryPaths.push(normPath+'_');
+                        if(/\.(png|jpg|jpeg)$/i.test(normPath)) tryPaths.push(normPath.replace(/\.(png|jpg|jpeg)$/i,'.rpgmvp'));
+                        if(/\.(ogg|m4a)$/i.test(normPath)) tryPaths.push(normPath.replace(/\.(ogg|m4a)$/i,'.rpgmvo'));
                     }
+                }
+                var foundBlob=null;
+                for(var ti=0;ti<tryPaths.length;ti++){
+                    if(vfs&&vfs.fileExists(tryPaths[ti])){
+                        foundBlob=vfs.createMediaUrl(tryPaths[ti]);
+                        if(foundBlob) break;
+                    }
+                }
+                if(foundBlob){
+                    this.__vfsBlobUrl=foundBlob;
+                    var self=this;
+                    var origOnload=self.onload,origOnerror=self.onerror;
+                    self.onload=function(e){
+                        if(self.__vfsBlobUrl){vfs.revokeMediaUrl(self.__vfsBlobUrl);self.__vfsBlobUrl=null;}
+                        if(typeof origOnload==='function') origOnload.call(self,e);
+                    };
+                    self.onerror=function(e){
+                        if(self.__vfsBlobUrl){vfs.revokeMediaUrl(self.__vfsBlobUrl);self.__vfsBlobUrl=null;}
+                        if(typeof origOnerror==='function') origOnerror.call(self,e);
+                    };
+                    _set.call(this,foundBlob);return;
                 }
                 // Missing image: use 1x1 transparent PNG to prevent 404s
                 if(vfs){_set.call(this,_emptyPng);return;}
@@ -2201,9 +2378,20 @@ var _emptyPng='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcS
                     setTimeout(function(){if(audioEl.__vfsAudioBlobUrl===prevBlob)return;vfs.revokeMediaUrl(prevBlob);},200);
                     this.__vfsAudioBlobUrl=null;
                 }
-                if(vfs&&vfs.fileExists(normPath)){
-                    var blobUrl=vfs.createMediaUrl(normPath);
-                    if(blobUrl){this.__vfsAudioBlobUrl=blobUrl;_set.call(this,blobUrl);return;}
+                // Try encrypted filename variants
+                var tryPaths=[normPath];
+                if(vfs&&!vfs.fileExists(normPath)){
+                    var lower=normPath.toLowerCase();
+                    if(!lower.endsWith('.ogg_')&&!lower.endsWith('.m4a_')&&!lower.endsWith('.rpgmvo')){
+                        tryPaths.push(normPath+'_');
+                        if(/\.(ogg|m4a)$/i.test(normPath)) tryPaths.push(normPath.replace(/\.(ogg|m4a)$/i,'.rpgmvo'));
+                    }
+                }
+                for(var ti=0;ti<tryPaths.length;ti++){
+                    if(vfs&&vfs.fileExists(tryPaths[ti])){
+                        var blobUrl=vfs.createMediaUrl(tryPaths[ti]);
+                        if(blobUrl){this.__vfsAudioBlobUrl=blobUrl;_set.call(this,blobUrl);return;}
+                    }
                 }
                 _set.call(this,value);
             },configurable:true,enumerable:true
@@ -2434,21 +2622,86 @@ function hookStorageManager(){
     };
 }
 setInterval(function(){if(typeof StorageManager!=='undefined') hookStorageManager();},50);
-// Utils hooks
-var _utilsHooked=false;
-function hookUtils(){
-    if(_utilsHooked) return;
-    if(typeof Utils==='undefined'){setTimeout(hookUtils,100);return;}
-    _utilsHooked=true;
-    Utils.isNwjs=function(){return false;};
+// ---- Encryption key injection ----
+// TWO-LAYER HOOK:
+// 1. Proxy on Decrypter — intercepts hasEncryptedImages/_encryptionKey SETS
+//    so the engine's own init code can't overwrite our values.
+// 2. Utils.setEncryptionInfo as backup (called once available).
+var __vfsEncDone=false, __vfsEncKey='', __vfsEncHasImg=false, __vfsEncHasAud=false;
+function __vfsGetEncInfo(){
+    if(__vfsEncKey) return;
     var vfs=getVfs();
-    if(vfs&&vfs.encryptionInfo){
-        var enc=vfs.encryptionInfo;
-        try{Utils.setEncryptionInfo(enc.hasImages,enc.hasAudio,enc.key);}catch(e){console.warn('[VFS Sandbox] setEncryptionInfo not available, skipping');}
-        console.log('[VFS Sandbox] Encryption key injected. hasImages='+enc.hasImages+' hasAudio='+enc.hasAudio);
-    }else{try{Utils.setEncryptionInfo(false,false,'');}catch(e){}}
+    if(vfs&&vfs.encryptionInfo&&vfs.encryptionInfo.key){
+        __vfsEncKey=vfs.encryptionInfo.key;
+        __vfsEncHasImg=vfs.encryptionInfo.hasImages!==false;
+        __vfsEncHasAud=vfs.encryptionInfo.hasAudio!==false;
+    }
 }
-setInterval(function(){if(typeof Utils!=='undefined') hookUtils();},50);
+__vfsGetEncInfo(); // try immediately
+// Hook 1: Proxy on Decrypter — intercept assignment of encrypted-image flags.
+// RPG Maker MZ/MV sets these in rpg_core.js:
+//   Decrypter.hasEncryptedImages = ...;
+//   Decrypter._encryptionKey = ...;
+var __vfsDecrypter=undefined;
+try{
+    Object.defineProperty(window,'Decrypter',{
+        configurable:true,enumerable:true,
+        get:function(){return __vfsDecrypter;},
+        set:function(raw){
+            if(!raw||typeof raw!=='object'){__vfsDecrypter=raw;return;}
+            __vfsGetEncInfo();
+            __vfsDecrypter=new Proxy(raw,{
+                set:function(target,prop,value){
+                    // VFS decrypts transparently — engine should NOT try to decrypt
+                    if(prop==='hasEncryptedImages'){
+                        target[prop]=false;
+                        console.log('[VFS] Decrypter.hasEncryptedImages → false (VFS decrypts transparently)');
+                        return true;
+                    }
+                    if(prop==='hasEncryptedAudio'){
+                        target[prop]=false;
+                        return true;
+                    }
+                    // Store key for plugins that may read it, but don't use for decryption
+                    if(prop==='_encryptionKey'&&__vfsEncKey){
+                        target[prop]=__vfsEncKey;
+                        console.log('[VFS] Decrypter._encryptionKey stored (len='+__vfsEncKey.length+')');
+                        return true;
+                    }
+                    // Pass through all other assignments
+                    target[prop]=value;
+                    return true;
+                }
+            });
+        }
+    });
+}catch(e){/* ignore */}
+
+// Hook 2: Utils.setEncryptionInfo — backup, fires once Utils is fully defined.
+var __vfsUtils=undefined;
+function __vfsTryInjectUtils(){
+    if(__vfsEncDone) return;
+    if(!__vfsUtils||typeof __vfsUtils.setEncryptionInfo!=='function') return;
+    __vfsEncDone=true;
+    __vfsGetEncInfo();
+    if(__vfsEncKey){
+        __vfsUtils.isNwjs=function(){return false;};
+        try{
+            __vfsUtils.setEncryptionInfo(__vfsEncHasImg,__vfsEncHasAud,__vfsEncKey);
+            console.log('[VFS] Utils.setEncryptionInfo called. key='+__vfsEncKey.slice(0,8)+'…');
+        }catch(e){console.warn('[VFS] setEncryptionInfo failed:',e);}
+    }
+}
+try{
+    Object.defineProperty(window,'Utils',{
+        configurable:true,enumerable:true,
+        get:function(){return __vfsUtils;},
+        set:function(v){__vfsUtils=v;__vfsTryInjectUtils();}
+    });
+}catch(e){/* fallback: poll */ var __vfsPoll2=setInterval(__vfsTryInjectUtils,16);}
+// Secondary poll for edge cases (auto-stops after 10s)
+var __vfsRafPoll2=setInterval(__vfsTryInjectUtils,16);
+setTimeout(function(){clearInterval(__vfsRafPoll2);},10000);
 // Anchor tag
 var origSetAttr=HTMLAnchorElement.prototype.setAttribute;
 HTMLAnchorElement.prototype.setAttribute=function(name,value){
@@ -2639,17 +2892,16 @@ window.addEventListener('beforeunload',()=>{vfs.shutdown();});
       });
       if (inGame) {
         // Hide library-only header buttons
-        var grid=document.getElementById('btn-view-grid'), list=document.getElementById('btn-view-list'), add=document.getElementById('btn-add-game');
-        if(grid)grid.style.display='none';
-        if(list)list.style.display='none';
+        var toggle=document.getElementById('btn-view-toggle'), add=document.getElementById('btn-add-game');
+        if(toggle)toggle.style.display='none';
         if(add)add.style.display='none';
         if(leftToggle)leftToggle.style.display='';
         if(rightToggle)rightToggle.style.display='';
         syncFloatingBtns();
       } else {
-        var grid=document.getElementById('btn-view-grid'), list=document.getElementById('btn-view-list'), add=document.getElementById('btn-add-game');
-        if(grid)grid.style.display='';
-        if(list)list.style.display='';
+        var toggle=document.getElementById('btn-view-toggle'), add=document.getElementById('btn-add-game');
+        if(toggle)toggle.style.display='';
+        if(add)add.style.display='';
         if(add)add.style.display='';
         if(leftToggle)leftToggle.style.display='none';
         if(rightToggle)rightToggle.style.display='none';
@@ -2689,29 +2941,86 @@ window.addEventListener('beforeunload',()=>{vfs.shutdown();});
     var hideTimer = null;
 
     function showHeader() {
-      document.body.classList.remove('fs-active');
+      document.body.classList.remove('fs-active','pseudo-fs');
       if (hideTimer) clearTimeout(hideTimer);
       hideTimer = setTimeout(function() {
-        if (document.fullscreenElement) document.body.classList.add('fs-active');
+        if (isFullscreen()) {
+          document.body.classList.add(document.fullscreenElement?'fs-active':'pseudo-fs');
+        }
       }, 3000);
     }
 
-    document.addEventListener('fullscreenchange', function() {
-      if (document.fullscreenElement) {
+    // Real fullscreen changes: upgrade from pseudo to real, or clean up
+    function onFsChange() {
+      var realFs = !!(document.fullscreenElement || document.webkitFullscreenElement ||
+                      document.mozFullScreenElement || document.msFullscreenElement);
+      if (realFs) {
+        document.body.classList.remove('pseudo-fs');
         document.body.classList.add('fs-active');
+        btnFS.textContent = '⛶';
       } else {
         document.body.classList.remove('fs-active');
+        // If pseudo was active and real FS just exited, re-apply pseudo
+        if (document.body.classList.contains('pseudo-fs')) {
+          btnFS.textContent = '✕';
+        } else {
+          btnFS.textContent = '⛶';
+        }
         if (hideTimer) clearTimeout(hideTimer);
       }
-    });
+    }
+    document.addEventListener('fullscreenchange', onFsChange);
+    document.addEventListener('webkitfullscreenchange', onFsChange);
+    document.addEventListener('mozfullscreenchange', onFsChange);
+    document.addEventListener('msfullscreenchange', onFsChange);
+
+    // Mobile fullscreen: try real API first, with vendor prefixes
+    function requestFullscreen(el) {
+      var methods = ['requestFullscreen','webkitRequestFullscreen','mozRequestFullScreen','msRequestFullscreen'];
+      for (var i = 0; i < methods.length; i++) {
+        if (el[methods[i]]) { el[methods[i]](); return true; }
+      }
+      return false;
+    }
+    function exitFullscreen() {
+      var methods = ['exitFullscreen','webkitExitFullscreen','mozCancelFullScreen','msExitFullscreen'];
+      for (var i = 0; i < methods.length; i++) {
+        if (document[methods[i]]) { document[methods[i]](); return true; }
+      }
+      document.body.classList.remove('pseudo-fs');
+      return false;
+    }
+    function isFullscreen() {
+      return !!(document.fullscreenElement || document.webkitFullscreenElement ||
+                document.mozFullScreenElement || document.msFullscreenElement ||
+                document.body.classList.contains('pseudo-fs'));
+    }
+
+    var btnFS = document.getElementById('btn-fullscreen');
+    if (btnFS) {
+      btnFS.addEventListener('click', function(e) {
+        if (isFullscreen()) {
+          exitFullscreen();
+          document.body.classList.remove('pseudo-fs','fs-active');
+          btnFS.textContent = '⛶';
+        } else {
+          // Apply pseudo-fullscreen IMMEDIATELY (covers iOS + any API failure)
+          document.body.classList.add('pseudo-fs');
+          btnFS.textContent = '✕';
+          // Try real API in parallel — if it succeeds, upgrade to real fullscreen
+          var realFs = requestFullscreen(document.body) || requestFullscreen(document.documentElement);
+          if (!realFs) {
+            console.log('[UI] 📱 真实全屏API不可用，使用CSS伪全屏');
+          }
+        }
+      }, true);
+    }
 
     // Tap top edge or hotzone to reveal header
     hotzone.addEventListener('click', showHeader);
     hotzone.addEventListener('touchend', showHeader);
-
-    // Also reveal on mousemove near top
     document.addEventListener('mousemove', function(e) {
-      if (document.fullscreenElement && e.clientY < 6) showHeader();
+      if (e.clientY < 6 && (document.fullscreenElement || document.body.classList.contains('pseudo-fs'))) showHeader();
     });
   })();
 
@@ -2726,9 +3035,23 @@ window.addEventListener('beforeunload',()=>{vfs.shutdown();});
         if (!name.endsWith('.rmmzsave') && !name.endsWith('.rpgsave')) {
           alert('⚠️ 非存档文件，请重试！\n\n仅支持 .rmmzsave 或 .rpgsave 格式的存档文件。\n当前文件: ' + file.name);
           upload.value = '';
-          // Stop propagation so module handler doesn't run
           e.stopImmediatePropagation();
           e.preventDefault();
+          return;
+        }
+        // Check if replacing auto/global save
+        var saveName = file.name.replace(/\.rmmzsave$/i,'').replace(/\.rpgsave$/i,'').replace(/\\/g,'/').split('/').pop();
+        var isAutoOrGlobal = (saveName === 'global' || saveName === 'Global' || saveName === 'file0');
+        if (isAutoOrGlobal) {
+          var existingEl = document.querySelector('#save-list .btn-dl[data-key$=".' + saveName + '"]');
+          if (existingEl || saveName === 'global') {
+            var typeLabel = (saveName === 'global' || saveName === 'Global') ? '全局存档' : '自动存档';
+            if (!confirm('⚠️ 已存在' + typeLabel + '！\n\n确定要用新文件替换现有的' + typeLabel + '吗？\n此操作不可撤销。')) {
+              upload.value = '';
+              e.stopImmediatePropagation();
+              e.preventDefault();
+            }
+          }
         }
       }, true); // capture phase — runs before module handler
     }
@@ -2759,7 +3082,9 @@ window.addEventListener('beforeunload',()=>{vfs.shutdown();});
 
             var saveNum = parseInt(rawName.replace(/^file/i,''));
             var saveTag = rawName;
-            if (!isNaN(saveNum)) {
+            if (rawName === 'global' || rawName === 'Global') {
+                saveTag = '🌐 全局存档';
+            } else if (!isNaN(saveNum)) {
                 saveTag = (saveNum === 0) ? '🟢 自动存档' : '💾 手动存档 #' + saveNum;
             }
 
@@ -2770,8 +3095,133 @@ window.addEventListener('beforeunload',()=>{vfs.shutdown();});
 
     function escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
+    // Also detect global saves and inject them into the list
+    async function injectGlobalSaves() {
+        try {
+            var keys = await localforage.keys();
+            var vfsGameId = (typeof vfs !== 'undefined' && vfs.gameId) ? vfs.gameId : '';
+            // Look for global save in localforage (MZ format)
+            for (var i = 0; i < keys.length; i++) {
+                var k = keys[i];
+                var m = k.match(/^rmmzsave\.(.+?)\.(global|Global)$/i);
+                if (m) {
+                    var gid = m[1], sname = m[2];
+                    // Check if already in the list
+                    var existing = saveList.querySelector('.btn-dl[data-key="' + k + '"]');
+                    if (existing) continue;
+                    // Inject entry
+                    var entry = document.createElement('div');
+                    entry.className = 'save-entry';
+                    entry.innerHTML = '<span><span style="font-weight:600;">🌐 全局存档</span> <span style="font-size:9px;color:var(--mute);">(' + escHtml2(sname) + ' · LF)</span></span>' +
+                        '<button class="btn-dl" data-key="' + k + '" data-storage="localforage">⬇</button>' +
+                        '<button class="btn-del" data-key="' + k + '" data-storage="localforage">✕</button>';
+                    saveList.appendChild(entry);
+                    // Attach download handler
+                    var dl = entry.querySelector('.btn-dl');
+                    dl.addEventListener('click', function() {
+                        localforage.getItem(k).then(function(data) {
+                            if (data) {
+                                var blob = new Blob([data], {type:'application/octet-stream'});
+                                var url = URL.createObjectURL(blob);
+                                var a = document.createElement('a');
+                                a.href = url; a.download = sname + '.rmmzsave'; a.click();
+                                URL.revokeObjectURL(url);
+                            }
+                        });
+                    });
+                    // Attach delete handler
+                    var del = entry.querySelector('.btn-del');
+                    del.addEventListener('click', function() {
+                        if (confirm('确定删除全局存档？')) {
+                            localforage.removeItem(k).then(function() { entry.remove(); });
+                        }
+                    });
+                }
+            }
+            // Check localStorage for MV global save
+            var lsKey = 'RPG Save global';
+            if (localStorage.getItem(lsKey)) {
+                var existing = saveList.querySelector('.btn-dl[data-key="' + lsKey + '"]');
+                if (!existing) {
+                    var entry = document.createElement('div');
+                    entry.className = 'save-entry';
+                    entry.innerHTML = '<span><span style="font-weight:600;">🌐 全局存档</span> <span style="font-size:9px;color:var(--mute);">(global · LS)</span></span>' +
+                        '<button class="btn-dl" data-key="' + lsKey + '" data-storage="localStorage">⬇</button>' +
+                        '<button class="btn-del" data-key="' + lsKey + '" data-storage="localStorage">✕</button>';
+                    saveList.appendChild(entry);
+                    var dl = entry.querySelector('.btn-dl');
+                    dl.addEventListener('click', function() {
+                        var data = localStorage.getItem(lsKey);
+                        if (data) {
+                            var blob = new Blob([data], {type:'application/octet-stream'});
+                            var url = URL.createObjectURL(blob);
+                            var a = document.createElement('a');
+                            a.href = url; a.download = 'global.rmmzsave'; a.click();
+                            URL.revokeObjectURL(url);
+                        }
+                    });
+                    var del = entry.querySelector('.btn-del');
+                    del.addEventListener('click', function() {
+                        if (confirm('确定删除全局存档？')) {
+                            localStorage.removeItem(lsKey); entry.remove();
+                        }
+                    });
+                }
+            }
+        } catch(e) {}
+    }
+    function escHtml2(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+    // Sort save entries: global → auto(file0) → manual(by number)
+    function sortSaveEntries() {
+        var entries = Array.from(saveList.querySelectorAll('.save-entry'));
+        entries.sort(function(a, b) {
+            var ka = (a.querySelector('.btn-dl')||{}).getAttribute('data-key')||'';
+            var kb = (b.querySelector('.btn-dl')||{}).getAttribute('data-key')||'';
+            function rank(key) {
+                var name = key.split('.').pop().replace(/^file/i,'');
+                if (name === 'global' || name === 'Global') return 0;  // global first
+                if (name === '0') return 1;  // auto save second
+                var n = parseInt(name);
+                if (!isNaN(n)) return n + 2;  // manual saves by number
+                return 999;  // others at bottom
+            }
+            return rank(ka) - rank(kb);
+        });
+        entries.forEach(function(e) { saveList.appendChild(e); });
+    }
+
+    // Intercept non-global save downloads with a warning
+    saveList.addEventListener('click', function(e) {
+        var btn = e.target.closest('.btn-dl');
+        if (!btn) return;
+        var key = btn.getAttribute('data-key')||'';
+        var saveName = key.split('.').pop().replace(/^file/i,'');
+        if (saveName === 'global' || saveName === 'Global') return; // global save, no warning
+        e.stopPropagation();
+        e.preventDefault();
+        if (confirm('📥 下载存档: ' + saveName + '\n\n⚠️ 重要提示：\n• 请勿更改下载文件的名称\n• 导入时需要搭配全局存档(global.rmmzsave)一起使用\n• 否则游戏可能无法正确读取存档\n\n确定下载？')) {
+            // Re-trigger the download manually
+            var storage = btn.getAttribute('data-storage');
+            var dataPromise = (storage === 'localforage') ? localforage.getItem(key) : Promise.resolve(localStorage.getItem(key));
+            dataPromise.then(function(data) {
+                if (data) {
+                    var blob = new Blob([data], {type:'application/octet-stream'});
+                    var url = URL.createObjectURL(blob);
+                    var a = document.createElement('a');
+                    a.href = url; a.download = saveName + '.rmmzsave'; a.click();
+                    URL.revokeObjectURL(url);
+                }
+            });
+        }
+    }, true); // capture phase
+
     enhanceSaveEntries();
-    var saveObs = new MutationObserver(enhanceSaveEntries);
+    injectGlobalSaves().then(sortSaveEntries);
+    var saveObs = new MutationObserver(function() {
+        enhanceSaveEntries();
+        injectGlobalSaves().then(sortSaveEntries);
+    });
     saveObs.observe(saveList, { childList: true, subtree: true });
   })();
 
@@ -2985,6 +3435,27 @@ function gamepadLoop(){
             if(justPressed[1]) closeMenu();
         }
 
+        // ── Gameplay isolation: force UI lockdown every frame ──────────
+        if (gpadIsolate && !isMenuOpen) {
+            // Blur any UI focus that slipped through (includes header)
+            var ae = document.activeElement;
+            if (ae && ae !== document.body && ae !== document.documentElement) {
+                var inUI = false;
+                var ids = ['side-panel','sidebar-left','settings-overlay','home-view'];
+                var tags = ['HEADER'];
+                for (var ci = 0; ci < ids.length; ci++) {
+                    var c = document.getElementById(ids[ci]);
+                    if (c && c.contains(ae)) { inUI = true; break; }
+                }
+                if (!inUI) {
+                    for (var ti = 0; ti < tags.length; ti++) {
+                        if (ae.closest && ae.closest(tags[ti])) { inUI = true; break; }
+                    }
+                }
+                if (inUI) { ae.blur(); }
+            }
+        }
+
         for(var i=0;i<18;i++) prevButtons[i]=curBtn[i];
     }catch(err){ console.error('[Gamepad-System] ❌ 轮询异常:',err); }
     rafId=requestAnimationFrame(gamepadLoop);
@@ -3005,11 +3476,15 @@ document.addEventListener('focusin', function(e) {
     if (window.__gamepadIsMenuOpen) return;
     if (!e.target || e.target === document.body) return;
     var inUI = false;
-    var containers = ['sidebar-left','side-panel','settings-overlay','home-view'];
-    for (var i = 0; i < containers.length; i++) {
-        var c = document.getElementById(containers[i]);
+    var ids = ['sidebar-left','side-panel','settings-overlay','home-view'];
+    for (var i = 0; i < ids.length; i++) {
+        var c = document.getElementById(ids[i]);
         if (c && c.contains(e.target)) { inUI = true; break; }
     }
+    // Also check if inside header (which contains fullscreen/settings/upload buttons)
+    if (!inUI && e.target.closest && e.target.closest('header')) { inUI = true; }
+    // Also block floating toggle buttons
+    if (!inUI && (e.target.closest && e.target.closest('.floating-btn'))) { inUI = true; }
     if (inUI) { e.target.blur(); console.log('[Gamepad-System] 🛡️ 拦截UI焦点: ' + (e.target.id||e.target.tagName)); }
 }, true);
 
