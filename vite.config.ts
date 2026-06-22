@@ -5,6 +5,11 @@ import {defineConfig} from 'vite';
 
 export default defineConfig(() => {
   return {
+
+    // GitHub Pages 配置关键：base 必须设置为 '/仓库名/'
+    // 如果你的访问地址是 https://用户名.github.io/my-repo/，则 base 为 '/my-repo/'
+    base: '/test-rpgmz/',
+
     plugins: [react(), tailwindcss()],
     resolve: {
       alias: {
