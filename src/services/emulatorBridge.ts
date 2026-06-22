@@ -273,9 +273,21 @@ export async function loadAndBootGame(
     containerElement.innerHTML = '';
     containerElement.appendChild(iframe);
 
-    // 等待 iframe 加载完成
+    // 等待 iframe 加载完成（srcdoc 的 load 事件可能不触发，加 sandbox-ready 兜底）
     await new Promise<void>(resolve => {
-      iframe.addEventListener('load', () => resolve(), { once: true });
+      let resolved = false;
+      const done = () => { if (resolved) return; resolved = true; cleanup(); resolve(); };
+
+      // 主路径：iframe load 事件
+      iframe.addEventListener('load', done, { once: true });
+
+      // 兜底：沙箱 Game_Message 钩子安装完成后发送 sandbox-ready
+      const onSandboxReady = (e: MessageEvent) => {
+        if (e.data?.source === 'iframe-game' && e.data?.type === 'sandbox-ready') done();
+      };
+      window.addEventListener('message', onSandboxReady);
+
+      const cleanup = () => window.removeEventListener('message', onSandboxReady);
     });
 
     // 7. 更新最后游玩时间

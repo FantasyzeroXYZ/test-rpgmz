@@ -101,6 +101,50 @@ export const EmulatorView: React.FC<EmulatorViewProps> = ({
   const textPollTimerRef = React.useRef<NodeJS.Timeout | null>(null);
   const gameContainerRef = React.useRef<HTMLDivElement | null>(null);
 
+  // 消息监听器 — 独立于加载流程，不受 _emulatorLoading 影响
+  // （StrictMode 双挂载时清理后需重新添加，否则 text-changed 永远收不到）
+  React.useEffect(() => {
+    const handleGameText = (e: MessageEvent) => {
+      if (!e.data || e.data.source !== 'iframe-game') return;
+      if (e.data.type !== 'text-changed') return;
+
+      console.log('[EmulatorView] text-changed 收到，raw:', JSON.stringify(e.data.text));
+
+      let text = '';
+
+      // 优先：调用 captureGameText 获取转义码处理后的完整文本
+      try {
+        const iframe = iframeRef.current;
+        if (iframe?.contentWindow && typeof iframe.contentWindow.captureGameText === 'function') {
+          text = iframe.contentWindow.captureGameText() || '';
+        }
+      } catch (err) { /* 跨域 */ }
+
+      // 兜底：使用事件原始文本，宿主端剥离转义码
+      if (!text.trim() && e.data.text) {
+        text = String(e.data.text)
+          .replace(/\x1bC\[\d+\]/gi, '')
+          .replace(/\x1b\{/g, '').replace(/\x1b\}/g, '')
+          .replace(/\x1b\./g, '').replace(/\x1b\|/g, '')
+          .replace(/\x1b!/g, '').replace(/\x1b\^/g, '')
+          .replace(/\x1b\$/g, '').replace(/\x1b</g, '').replace(/\x1b>/g, '')
+          .replace(/\x1b\\\\/g, '')
+          .replace(/\x1b[A-Z]+(?:\[\d+\])?/gi, '')
+          .replace(/\x1bF\[[^\]]*\]/gi, '')
+          .replace(/\x1bI\[\d+\]/gi, '')
+          .replace(/\f/g, '\n---\n')
+          .replace(/\x1b/g, '');
+      }
+
+      if (text && text.trim()) {
+        setGameText(text);
+        setUIState({ dictionarySentence: text.trim() });
+      }
+    };
+    window.addEventListener('message', handleGameText);
+    return () => window.removeEventListener('message', handleGameText);
+  }, [game?.id]);
+
   // 当进入游戏界面时，启动模拟器引擎
   React.useEffect(() => {
     if (!game?.id) return;
@@ -125,21 +169,6 @@ export const EmulatorView: React.FC<EmulatorViewProps> = ({
       if (result.success && result.iframe) {
         iframeRef.current = result.iframe;
         setGameLoading(false);
-
-        // 使用 MutationObserver 事件驱动文本更新（不再轮询）
-        // 沙箱 IIFE 中的 MutationObserver 在文本变化时发送 postMessage
-        const handleGameText = (e: MessageEvent) => {
-          if (e.data?.source === 'iframe-game' && e.data?.type === 'game-text') {
-            const text = e.data.text;
-            if (text && text.trim()) {
-              setGameText(text);
-              setUIState({ dictionarySentence: text.trim() });
-            }
-          }
-        };
-        window.addEventListener('message', handleGameText);
-        // 保存引用以便清理
-        (iframeRef.current as any).__textHandler = handleGameText;
       } else {
         setGameLoading(false);
         alert('游戏启动失败: ' + (result.error || '未知错误'));
@@ -148,10 +177,6 @@ export const EmulatorView: React.FC<EmulatorViewProps> = ({
 
     // 清理函数：退出时关闭模拟器
     return () => {
-      if (iframeRef.current) {
-        const handler = (iframeRef.current as any).__textHandler;
-        if (handler) window.removeEventListener('message', handler);
-      }
       shutdownGame();
       iframeRef.current = null;
     };
@@ -550,9 +575,14 @@ export const EmulatorView: React.FC<EmulatorViewProps> = ({
         cancelText="取消"
         onConfirm={() => {
           setShowRestartConfirm(false);
-          // 清理当前游戏资源
+          // 完全关闭当前游戏
           shutdownGame();
-          alert("模拟核心成功复位！请重新加载游戏文件以继续游玩。");
+          const container = gameContainerRef.current || document.getElementById('game-container');
+          if (container) container.innerHTML = '';
+          iframeRef.current = null;
+          _emulatorLoading = false;
+          setGameText('');
+          alert("模拟核心成功复位！请返回大厅重新选择游戏以继续游玩。");
         }}
         onCancel={() => setShowRestartConfirm(false)}
         theme={uiState.theme}
@@ -567,6 +597,13 @@ export const EmulatorView: React.FC<EmulatorViewProps> = ({
         cancelText="留在这里"
         onConfirm={() => {
           setShowHomeConfirm(false);
+          // 完全关闭游戏
+          shutdownGame();
+          const container = gameContainerRef.current || document.getElementById('game-container');
+          if (container) container.innerHTML = '';
+          iframeRef.current = null;
+          _emulatorLoading = false;
+          setGameText('');
           (window as any).postMessage({ type: "NAV_HOME" }, "*");
         }}
         onCancel={() => setShowHomeConfirm(false)}

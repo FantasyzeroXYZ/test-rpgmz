@@ -453,6 +453,8 @@ function hookGameMessage(){
         try{window.parent.postMessage({source:'iframe-game',type:'text-cleared'},'*');}catch(e){}
     };
     console.log('[VFS Sandbox] Game_Message hooks installed (event-driven text extraction)');
+    // 通知宿主页面沙箱已就绪（用于解除加载进度条）
+    try{window.parent.postMessage({source:'iframe-game',type:'sandbox-ready'},'*');}catch(e){}
 }
 setInterval(function(){if(typeof Game_Message!=='undefined') hookGameMessage();},100);
 // StorageManager hooks
