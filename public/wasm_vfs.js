@@ -194,6 +194,49 @@ function decryptRpgmvData(data, hexKey) {
 }
 
 // -----------------------------------------------------------------------------
+// Game Root Detector — Configuration
+// -----------------------------------------------------------------------------
+// All tunable thresholds, marker names, and engine behaviour are collected here
+// so they can be adjusted without touching the detection logic.
+// -----------------------------------------------------------------------------
+const GAME_ROOT_CONFIG = {
+    // Entry-point file names searched during the global fuzzy scan (lowercase).
+    entryFiles: ['index.html'],
+
+    // Fallback regex for any HTML file when no entryFiles match.
+    fallbackPattern: /\.html?$/i,
+
+    // When a directory has <= this many immediate children AND contains no
+    // game-data markers, it is considered a "wrapper" directory and will be
+    // drilled through (Step 3).
+    childThreshold: 1,
+
+    // Directory names that may contain a nested web-root (e.g. NW.js wraps).
+    knownSpecialDirs: ['www'],
+
+    // Sub-directories whose presence signals "this is a game project folder".
+    gameDataMarkers: [
+        'data/', 'js/', 'effects/', 'img/', 'audio/', 'fonts/', 'css/'
+    ],
+
+    // Per-engine feature flags for the detection pipeline.
+    engineFeatures: {
+        'RPGMV': {
+            // MV ships web assets inside a www/ sub-directory.
+            checkWww: true,
+            // Directories that should co-exist with index.html in MV games.
+            siblingDirs: ['data/', 'js/'],
+        },
+        'RPGMZ': {
+            // MZ removed the www/ wrapper — never drill into www/ for MZ.
+            checkWww: false,
+            // MZ games typically have effects/ and data/ alongside index.html.
+            siblingDirs: ['effects/', 'data/'],
+        },
+    },
+};
+
+// -----------------------------------------------------------------------------
 // WasmVFS class
 // -----------------------------------------------------------------------------
 export class WasmVFS {
@@ -211,6 +254,8 @@ export class WasmVFS {
         this._gameId = null;
         /** @type {{ hasImages: boolean, hasAudio: boolean, key: string } | null} */
         this._encryptionInfo = null;
+        /** @type {string | null} — declared engine type for root detection */
+        this._engineType = null;
     }
 
     // =========================================================================
@@ -319,11 +364,29 @@ export class WasmVFS {
      *        Optional progress callback.
      * @returns {Promise<{fileCount: number, basePath: string, indexHtmlPath: string}>}
      */
-    async loadZip(zipFile, onProgress, preKey) {
+    async loadZip(zipFile, onProgress, preKey, engineType) {
         this._assertReady();
 
-        // Clear any previous game data.
-        this.shutdown();
+        // Clear WASM filesystem but keep existing blob URLs alive for 30s
+        // so in-flight script/image loads from a previous game aren't broken.
+        // React StrictMode double-mount can trigger loadZip() while the first
+        // game's scripts are still loading via blob URLs.
+        if (this._initialized) {
+            clear_fs();
+        }
+        this._basePath = '';
+        this._gameId = null;
+        this._encryptionInfo = null;
+        this._engineType = null;
+        // Schedule old blob URLs for cleanup after a grace period
+        var _oldBlobs = this._activeBlobUrls;
+        this._activeBlobUrls = new Set();
+        this._imageBlobCache = new Map();
+        setTimeout(function() {
+            _oldBlobs.forEach(function(url) {
+                try { URL.revokeObjectURL(url); } catch(_) {}
+            });
+        }, 30000);
 
         // Re-initialise fresh.
         init_fs();
@@ -393,8 +456,9 @@ export class WasmVFS {
             }
         }
 
-        // --- auto-detect basePath ---
-        this._detectBasePath();
+        // --- auto-detect basePath (engine-aware) ---
+        this._engineType = engineType ? engineType.toUpperCase() : null;
+        this._detectBasePath(this._engineType);
 
         // --- auto-detect gameId from data/System.json ---
         this._detectGameId();
@@ -408,7 +472,7 @@ export class WasmVFS {
             this._patchSystemJson(this._encryptionInfo.key);
         }
 
-        const idxPath = this._findIndexHtml();
+        const idxPath = this._findIndexHtml(this._engineType);
         return {
             fileCount: file_count(),
             basePath: this._basePath,
@@ -416,85 +480,326 @@ export class WasmVFS {
         };
     }
 
+    // =========================================================================
+    // Game Root Detection — helpers
+    // =========================================================================
+
     /**
-     * Find the directory that contains index.html and set it as basePath.
-     * Also handles auto-drill: if root has only one folder, enter it.
-     *
-     * Examples:
-     * - zip has "MyGame/www/index.html" → basePath = "MyGame/www"
-     * - zip has only "www/" at root   → auto-drill → basePath = "www"
-     * - zip has game files at root    → basePath = ""  (e.g. MZ direct export)
-     * - NW.js wrap with package.json "main": "www/index.html" → basePath includes www/
+     * Return the set of immediate child names under `dir` from a flat path list.
+     * `dir` === '' means the zip root.
+     * @param {string} dir
+     * @param {string[]} paths
+     * @returns {Set<string>}
      */
-    _detectBasePath() {
+    _getImmediateChildren(dir, paths) {
+        const children = new Set();
+        const prefix = dir ? dir + '/' : '';
+        for (const p of paths) {
+            if (prefix && !p.startsWith(prefix)) continue;
+            const rest = prefix ? p.substring(prefix.length) : p;
+            const slash = rest.indexOf('/');
+            children.add(slash === -1 ? rest : rest.substring(0, slash));
+        }
+        return children;
+    }
+
+    /**
+     * Check whether `dir` contains game-data marker directories.
+     * @param {string} dir
+     * @param {string[]} paths
+     * @param {object} cfg
+     * @returns {boolean}
+     */
+    _hasGameFiles(dir, paths, cfg) {
+        const prefix = dir ? dir + '/' : '';
+        const markers = cfg.gameDataMarkers;
+        for (const p of paths) {
+            if (prefix && !p.startsWith(prefix)) continue;
+            const rest = prefix ? p.substring(prefix.length) : p;
+            for (const m of markers) {
+                if (rest === m.slice(0, -1) || rest.startsWith(m)) return true;
+            }
+        }
+        // Also true if an entry file exists directly in this directory.
+        const entryFiles = cfg.entryFiles;
+        for (const p of paths) {
+            if (prefix && !p.startsWith(prefix)) continue;
+            const rest = prefix ? p.substring(prefix.length) : p;
+            if (rest.indexOf('/') === -1) {
+                const lower = rest.toLowerCase();
+                if (entryFiles.some(ef => lower === ef)) return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * A directory is a "wrapper" when it has <= childThreshold children and
+     * no game-data markers directly inside it.
+     * @param {string} dir
+     * @param {string[]} paths
+     * @param {object} cfg
+     * @returns {boolean}
+     */
+    _isWrapperDir(dir, paths, cfg) {
+        const children = this._getImmediateChildren(dir, paths);
+        if (children.size > cfg.childThreshold) return false;
+        if (children.size === 0) return false;
+        return !this._hasGameFiles(dir, paths, cfg);
+    }
+
+    /**
+     * Recursively drill down through wrapper directories until reaching a
+     * directory that looks like a game root (or a dead end).
+     * @param {string} startDir
+     * @param {string[]} paths
+     * @param {object} cfg
+     * @returns {string|null} detected root, or null
+     */
+    _drillToGameRoot(startDir, paths, cfg) {
+        let current = startDir;
+        // Safety: maximum 10 levels of nesting
+        for (let depth = 0; depth < 10; depth++) {
+            // If current dir has game files, this is a valid root.
+            if (this._hasGameFiles(current, paths, cfg)) {
+                return current;
+            }
+            // If current dir is not a wrapper, stop.
+            if (!this._isWrapperDir(current, paths, cfg)) {
+                return this._hasGameFiles(current, paths, cfg) ? current : null;
+            }
+            // Drill into the single child directory.
+            const children = [...this._getImmediateChildren(current, paths)];
+            // Only drill if exactly ONE child (a folder).
+            if (children.length !== 1) return null;
+            const onlyChild = children[0];
+            // Verify it's actually a directory (contains a / in some path).
+            const prefix = current ? current + '/' : '';
+            const hasSub = paths.some(p =>
+                p.startsWith(prefix + onlyChild + '/') && p !== prefix + onlyChild + '/'
+            );
+            if (!hasSub) return null;
+            current = current ? current + '/' + onlyChild : onlyChild;
+        }
+        return null;
+    }
+
+    /**
+     * Verify that `dir` has the required sibling directories expected by a
+     * specific engine (e.g. MZ needs effects/ or data/ alongside index.html).
+     * @param {string} dir
+     * @param {string[]} paths
+     * @param {string[]} requiredDirs
+     * @returns {boolean}
+     */
+    _verifyEngineDirs(dir, paths, requiredDirs) {
+        const prefix = dir ? dir + '/' : '';
+        for (const rd of requiredDirs) {
+            const has = paths.some(p => {
+                if (prefix && !p.startsWith(prefix)) return false;
+                const rest = prefix ? p.substring(prefix.length) : p;
+                return rest === rd.slice(0, -1) || rest.startsWith(rd);
+            });
+            if (has) return true;
+        }
+        return false;
+    }
+
+    /**
+     * Find a target file (e.g. "index.html") inside a specific named directory
+     * (e.g. "www") anywhere in the path tree.
+     * @param {string} targetDir  — directory name (lowercase)
+     * @param {string} targetFile — file name (lowercase)
+     * @param {string[]} paths
+     * @returns {string|null} matching path, or null
+     */
+    _findInDir(targetDir, targetFile, paths) {
+        const tdir = targetDir.toLowerCase();
+        const tfile = targetFile.toLowerCase();
+        for (const p of paths) {
+            const parts = p.split('/');
+            if (parts.length < 2) continue;
+            const parent = parts[parts.length - 2].toLowerCase();
+            const fname = parts[parts.length - 1].toLowerCase();
+            if (parent === tdir && fname === tfile) return p;
+        }
+        return null;
+    }
+
+    // =========================================================================
+    // Game Root Detection — main algorithm
+    // =========================================================================
+
+    /**
+     * Engine-aware game-root detection.
+     *
+     * Priority order (highest first):
+     *   Step 0 – Engine-type pre-filter + global fuzzy index.html search
+     *   Step 1 – Flat structure (files at zip root)
+     *   Step 2 – Single parent-folder wrapper
+     *   Step 3 – Deep nesting drill‑down (threshold‑based)
+     *   Step 4 – RPG MV "www/" special structure (skipped for RPGMZ)
+     *   Fallback – first directory containing an entry file
+     *
+     * @param {string|null} engineType — 'RPGMV', 'RPGMZ', or null
+     */
+    _detectBasePath(engineType) {
         this._basePath = '';
         const paths = list_paths();
+        const cfg = GAME_ROOT_CONFIG;
 
-        // --- Auto-drill: if root contains only ONE folder (no files at root), enter it ---
-        const rootEntries = new Set();
-        for (const p of paths) {
-            const slash = p.indexOf('/');
-            rootEntries.add(slash === -1 ? p : p.substring(0, slash));
-        }
-        if (rootEntries.size === 1) {
-            const onlyEntry = [...rootEntries][0];
-            // If it's a directory (has files inside with /), use as basePath
-            const hasSubfiles = paths.some(p => p.startsWith(onlyEntry + '/') && p !== onlyEntry + '/');
-            if (hasSubfiles && !paths.includes('index.html')) {
-                this._basePath = onlyEntry;
+        // ---- helpers (bound to this) ----
+        const hasGameFiles = (d) => this._hasGameFiles(d, paths, cfg);
+        const verifyEngineDirs = (d, dirs) => this._verifyEngineDirs(d, paths, dirs);
+        const findInDir = (td, tf) => this._findInDir(td, tf, paths);
+
+        // =====================================================================
+        // Step 0 – Engine‑aware pre‑filter + global fuzzy search
+        // =====================================================================
+
+        // 0a. RPGMV: if engine is MV, try www/<entryFile> first.
+        if (engineType === 'RPGMV') {
+            for (const ef of cfg.entryFiles) {
+                const hit = findInDir('www', ef);
+                if (hit) {
+                    this._basePath = hit.substring(0, hit.lastIndexOf('/'));
+                    return;
+                }
             }
         }
 
-        // --- Check package.json "main" for additional depth hints ---
-        // If package.json points to a subdirectory, we may need to go deeper.
+        // 0b. Collect all paths whose filename matches an entry file.
+        const indexPaths = [];
         for (const p of paths) {
-            const name = p.split('/').pop().toLowerCase();
-            if (name === 'package.json') {
-                try {
-                    const prefix = this._basePath ? (this._basePath + '/') : '';
-                    // Check if this package.json is at or near the current basePath root
-                    if (!prefix || p.startsWith(prefix) || prefix.startsWith(p.substring(0, p.lastIndexOf('/') + 1))) {
-                        const data = read_file(p);
-                        const json = JSON.parse(new TextDecoder('utf-8').decode(data));
-                        if (json.main && typeof json.main === 'string') {
-                            const mainRaw = json.main.replace(/\\/g, '/');
-                            // If main points to a subdirectory (e.g. "www/index.html"),
-                            // extend basePath to include that subdirectory.
-                            const mainSlash = mainRaw.lastIndexOf('/');
-                            if (mainSlash !== -1) {
-                                const mainDir = mainRaw.substring(0, mainSlash);
-                                const pkgDir = p.substring(0, p.lastIndexOf('/'));
-                                const candidate = pkgDir
-                                    ? (pkgDir + '/' + mainDir).replace(/\/+/g, '/')
-                                    : mainDir;
-                                // Only adopt if more specific than current basePath
-                                if (!this._basePath || candidate.length > this._basePath.length) {
-                                    // Verify the directory actually contains game data
-                                    const hasData = paths.some(fp =>
-                                        fp.startsWith(candidate + '/') &&
-                                        (fp.endsWith('data/System.json') || fp.endsWith('data/system.json'))
-                                    );
-                                    if (hasData) {
-                                        this._basePath = candidate;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                } catch (_) { /* ignore */ }
+            const fname = p.split('/').pop().toLowerCase();
+            if (cfg.entryFiles.some(ef => fname === ef)) {
+                indexPaths.push(p);
             }
         }
 
-        // --- Use index.html location as final guide ---
-        const idx = this._findIndexHtml();
-        if (!idx) return;
-        const lastSlash = idx.lastIndexOf('/');
-        if (lastSlash !== -1) {
-            const dir = idx.substring(0, lastSlash);
-            // If we already have a basePath from auto-drill or package.json,
-            // only use the index.html directory if it's more specific
-            if (!this._basePath || dir.startsWith(this._basePath)) {
-                this._basePath = dir;
+        // 0c. Unique match → use its directory directly.
+        if (indexPaths.length === 1) {
+            const lastSlash = indexPaths[0].lastIndexOf('/');
+            this._basePath = lastSlash === -1 ? '' : indexPaths[0].substring(0, lastSlash);
+            return;
+        }
+
+        // 0d. RPGMZ pre-filter: among multiple index.html files, skip www/
+        //     entries and prefer the one whose sibling dirs match MZ conventions.
+        if (engineType === 'RPGMZ' && indexPaths.length > 1) {
+            const mzFeatures = cfg.engineFeatures['RPGMZ'];
+            // Separate non-www and www candidates.
+            const nonWww = indexPaths.filter(p => {
+                const parts = p.split('/');
+                return parts.length < 2 || parts[parts.length - 2].toLowerCase() !== 'www';
+            });
+            const wwwOnly = indexPaths.filter(p => {
+                const parts = p.split('/');
+                return parts.length >= 2 && parts[parts.length - 2].toLowerCase() === 'www';
+            });
+            // Prefer non-www candidates with MZ sibling dirs.
+            for (const idx of [...nonWww, ...wwwOnly]) {
+                const dir = idx.lastIndexOf('/') === -1 ? '' : idx.substring(0, idx.lastIndexOf('/'));
+                if (verifyEngineDirs(dir, mzFeatures.siblingDirs)) {
+                    this._basePath = dir;
+                    return;
+                }
+            }
+        }
+
+        // =====================================================================
+        // Steps 1‑3 – Heuristic directory traversal
+        // =====================================================================
+
+        // Build ordered candidates: directories of found entry files, then root.
+        const candidateDirs = indexPaths.length > 0
+            ? indexPaths.map(p => {
+                const s = p.lastIndexOf('/');
+                return s === -1 ? '' : p.substring(0, s);
+            })
+            : [''];
+
+        // Deduplicate while preserving order.
+        const seen = new Set();
+        const ordered = [];
+        for (const d of candidateDirs) {
+            if (!seen.has(d)) { seen.add(d); ordered.push(d); }
+        }
+
+        // Score each candidate by how many game-data markers it contains.
+        // In case of ties, prefer the shallower (shorter basePath) candidate.
+        const scoreCandidate = (dir) => {
+            const prefix = dir ? dir + '/' : '';
+            let score = 0;
+            for (const p of paths) {
+                if (prefix && !p.startsWith(prefix)) continue;
+                const rest = prefix ? p.substring(prefix.length) : p;
+                for (const m of cfg.gameDataMarkers) {
+                    if (rest === m.slice(0, -1) || rest.startsWith(m)) { score++; break; }
+                }
+            }
+            return score;
+        };
+
+        let bestResult = null;
+        let bestScore = -1;
+
+        for (const candidate of ordered) {
+            // Step 1 – Flat structure (game files directly at this candidate).
+            if (hasGameFiles(candidate)) {
+                const s = scoreCandidate(candidate);
+                if (s > bestScore || (s === bestScore && bestResult !== null && candidate.length < bestResult.length)) {
+                    bestScore = s;
+                    bestResult = candidate;
+                }
+                continue;
+            }
+
+            // Step 2 + 3 – Drill down through wrapper directories.
+            const drilled = this._drillToGameRoot(candidate, paths, cfg);
+            if (drilled !== null) {
+                const s = scoreCandidate(drilled);
+                if (s > bestScore || (s === bestScore && bestResult !== null && drilled.length < bestResult.length)) {
+                    bestScore = s;
+                    bestResult = drilled;
+                }
+            }
+        }
+
+        if (bestResult !== null) {
+            this._basePath = bestResult;
+            return;
+        }
+
+        // =====================================================================
+        // Step 4 – RPG MV "www/" special structure
+        // =====================================================================
+        // Only active when engine is NOT explicitly RPGMZ.
+        if (engineType !== 'RPGMZ') {
+            for (const ef of cfg.entryFiles) {
+                const wwwHit = findInDir('www', ef);
+                if (wwwHit) {
+                    this._basePath = wwwHit.substring(0, wwwHit.lastIndexOf('/'));
+                    return;
+                }
+            }
+        }
+
+        // =====================================================================
+        // Fallback – first directory containing an entry file
+        // =====================================================================
+        if (indexPaths.length > 0) {
+            const lastSlash = indexPaths[0].lastIndexOf('/');
+            this._basePath = lastSlash === -1 ? '' : indexPaths[0].substring(0, lastSlash);
+            return;
+        }
+
+        // Last resort: search for any .html/.htm file.
+        for (const p of paths) {
+            if (cfg.fallbackPattern.test(p.split('/').pop())) {
+                const lastSlash = p.lastIndexOf('/');
+                this._basePath = lastSlash === -1 ? '' : p.substring(0, lastSlash);
+                return;
             }
         }
     }
@@ -502,47 +807,45 @@ export class WasmVFS {
     /**
      * Locate the game's entry HTML anywhere in the VFS.
      *
-     * Strategy (in order):
-     * 1. Check package.json "main" field (NW.js / Electron wraps).
-     *    E.g. "www/index.html" or "index.html".
-     * 2. Look for index.html files — prefer ones under a "www/" directory
-     *    (common for NW.js-wrapped RPG Maker MV games).
+     * Strategy (in order, engine‑aware):
+     * 1. package.json "main" field (NW.js / Electron wraps).
+     * 2. Entry-file search using GAME_ROOT_CONFIG.entryFiles.
+     *    - RPGMV: prefer www/<entryFile>.
+     *    - Other: shortest matching entry file first.
      * 3. Fuzzy fallback: any .html / .htm file.
      *
+     * @param {string|null} [engineType]
      * @returns {string|null}
      */
-    _findIndexHtml() {
+    _findIndexHtml(engineType) {
         const paths = list_paths();
+        const cfg = GAME_ROOT_CONFIG;
 
         // --- 1. package.json "main" field ---
-        // Collect package.json files, sorted shallowest-first (root-level first).
         const pkgPaths = [];
         for (const p of paths) {
             if (p.split('/').pop().toLowerCase() === 'package.json') {
                 pkgPaths.push(p);
             }
         }
-        pkgPaths.sort((a, b) => a.length - b.length);  // root-level first
+        pkgPaths.sort((a, b) => a.length - b.length);
 
         for (const pkgPath of pkgPaths) {
             try {
                 const data = read_file(pkgPath);
                 const json = JSON.parse(new TextDecoder('utf-8').decode(data));
                 if (json.main && typeof json.main === 'string') {
-                    // Resolve "main" relative to the package.json directory
                     const pkgDir = pkgPath.substring(0, pkgPath.lastIndexOf('/'));
                     const raw = json.main.replace(/\\/g, '/');
                     const mainPath = pkgDir
                         ? (pkgDir + '/' + raw).replace(/\/+/g, '/')
                         : raw;
                     const mainLower = mainPath.toLowerCase();
-                    // Exact match first
                     for (const p of paths) {
                         if (p.replace(/\\/g, '/').toLowerCase() === mainLower) {
                             return p;
                         }
                     }
-                    // Filename-only match (case-insensitive)
                     const mainName = mainPath.split('/').pop().toLowerCase();
                     for (const p of paths) {
                         if (p.split('/').pop().toLowerCase() === mainName) {
@@ -550,19 +853,20 @@ export class WasmVFS {
                         }
                     }
                 }
-            } catch (_) { /* ignore unreadable / non-JSON package.json */ }
+            } catch (_) { /* ignore */ }
         }
 
-        // --- 2. Standard index.html search (prefer www/ subdir) ---
+        // --- 2. Entry-file search (engine‑aware) ---
         let best = null;
         let bestInWww = null;
+
         for (const p of paths) {
             const name = p.split('/').pop().toLowerCase();
-            if (name === 'index.html') {
+            if (cfg.entryFiles.some(ef => name === ef)) {
                 if (!best || p.length < best.length) {
                     best = p;
                 }
-                // Track index.html files whose parent dir is "www"
+                // Track entry files whose parent dir is "www"
                 const parts = p.split('/');
                 if (parts.length >= 2) {
                     const parentDir = parts[parts.length - 2].toLowerCase();
@@ -572,14 +876,21 @@ export class WasmVFS {
                 }
             }
         }
-        // Prefer www/index.html when available (NW.js wrap pattern)
-        if (bestInWww) best = bestInWww;
+
+        // RPGMV (or unknown engine): prefer www/<entryFile> when available.
+        // RPGMZ explicitly: skip www/ preference (MZ removed the www wrapper).
+        if (bestInWww && engineType !== 'RPGMZ') {
+            best = bestInWww;
+        } else if (engineType === 'RPGMZ' && bestInWww && !best) {
+            // MZ: only use www if no other entry file was found.
+            best = bestInWww;
+        }
 
         // --- 3. Fuzzy fallback: any .html / .htm ---
         if (!best) {
             for (const p of paths) {
                 const name = p.split('/').pop().toLowerCase();
-                if (name.endsWith('.html') || name.endsWith('.htm')) {
+                if (cfg.fallbackPattern.test(name)) {
                     best = p;
                     break;
                 }
@@ -905,6 +1216,13 @@ export class WasmVFS {
             else if (lo.endsWith('.jpg_') || lo.endsWith('.jpeg_')) mime = 'image/jpeg';
         }
 
+        // Encode path for X-VFS-Path header — HTTP headers must be ISO-8859-1.
+        // Non-ASCII characters (Cyrillic, CJK, etc.) in file paths will crash
+        // the Response constructor with: "String contains non ISO-8859-1 code point"
+        const safePath = internalPath.replace(/[^\x00-\xFF]/g, function(ch) {
+            return encodeURIComponent(ch);
+        });
+
         return new Response(data, {
             status: 200,
             headers: {
@@ -912,7 +1230,7 @@ export class WasmVFS {
                 'Content-Length': String(data.length),
                 'Accept-Ranges': 'bytes',
                 'Cache-Control': 'public, max-age=31536000, immutable',
-                'X-VFS-Path': internalPath
+                'X-VFS-Path': safePath
             }
         });
     }
@@ -1035,6 +1353,7 @@ export class WasmVFS {
         this._basePath = '';
         this._gameId = null;
         this._encryptionInfo = null;
+        this._engineType = null;
         if (this._initialized) {
             clear_fs();
         }
@@ -1220,7 +1539,7 @@ export class WasmVFS {
      * @returns {string|null}
      */
     getIndexHtml() {
-        const idxPath = this._findIndexHtml();
+        const idxPath = this._findIndexHtml(this._engineType);
         if (!idxPath) return null;
 
         const data = read_file(idxPath);

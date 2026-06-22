@@ -213,7 +213,8 @@ export async function initEmulator(): Promise<boolean> {
 export async function loadAndBootGame(
   libraryId: string,
   containerElement: HTMLElement,
-  onProgress?: (pct: number, msg: string) => void
+  onProgress?: (pct: number, msg: string) => void,
+  engineType?: string
 ): Promise<{ success: boolean; error?: string; iframe?: HTMLIFrameElement }> {
   // 1. 初始化 VFS
   if (!emulatorState.isInitialized) {
@@ -243,7 +244,8 @@ export async function loadAndBootGame(
         const pct = 10 + Math.round((cur / total) * 70);
         onProgress?.(pct, entryName || '加载中...');
       },
-      preKey
+      preKey,
+      engineType || null
     );
 
     onProgress?.(85, '初始化引擎...');

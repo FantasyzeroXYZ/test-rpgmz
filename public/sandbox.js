@@ -13,6 +13,12 @@ window.addEventListener('unhandledrejection',function(e){
     try{window.parent.postMessage({source:'iframe-game',type:'game-error',message:'Promise: '+String(e.reason),stack:(e.reason&&e.reason.stack)?e.reason.stack:'(no stack)'},'*');}catch(e2){}
 });
 console.log('[VFS Sandbox] IIFE starting, VFS available:',!!getVfs());
+	(function _vfsCheck(n){
+    var v=getVfs();
+    console.log('[VFS-CHECK#'+n+'] vfs='+!!v+' parent='+!!(window.parent&&window.parent!==window)+' ref='+!!(window.parent&&window.parent.__vfsRef)+' init='+(window.parent&&window.parent.__vfsRef&&window.parent.__vfsRef._initialized));
+    if(v){console.log('[VFS-CHECK#'+n+'] basePath='+(v._basePath||'(root)')+' pixi='+v.fileExists('js/libs/pixi.js')+' main='+v.fileExists('js/main.js')+' eff='+v.fileExists('js/libs/effekseer.min.js'));}
+    else if(n<10){setTimeout(function(){_vfsCheck(n+1);},500);}
+})(0);
 function getVfs(){
     if(window.__vfsRef&&window.__vfsRef._initialized) return window.__vfsRef;
     try{if(window.parent&&window.parent!==window){var pv=window.parent.__vfsRef;if(pv&&pv._initialized){window.__vfsRef=pv;return pv;}}}catch(e){}
@@ -273,6 +279,9 @@ function getEmptyVideoBlob(){
                     if(vfs&&vfs.fileExists(normPath)){
                         var blobUrl=vfs.createMediaUrl(normPath,'application/javascript');
                         if(blobUrl){this.__vfsOriginalPath=value;_sss.call(this,blobUrl);return;}
+                        console.warn('[VFS] Script blobUrl failed for:',value,'→',normPath);
+                    } else {
+                        console.warn('[VFS] Script not in VFS:',value,'→',normPath,' vfs:',!!vfs);
                     }
                 }catch(e){console.error('[VFS] Script src error:',e);}
                 _sss.call(this,value);
@@ -514,4 +523,69 @@ window.addEventListener('message',function(e){
     }
 });
 console.log('[VFS Sandbox] Interception layer injected. VFS available:',!!getVfs());
+
+	// ── Effekseer compat patch ──
+	// Prevents _createEffekseerContext from destroying _app on error,
+	// which would cause "Failed to initialize graphics."
+	(function(){
+	    var _check = setInterval(function(){
+	        if(typeof Graphics !== 'undefined' && Graphics._createEffekseerContext){
+	            clearInterval(_check);
+	            var _orig = Graphics._createEffekseerContext;
+	            Graphics._createEffekseerContext = function(){
+	                if(this._app && window.effekseer){
+	                    try {
+	                        this._effekseer = effekseer.createContext();
+	                        if(this._effekseer){
+	                            this._effekseer.init(this._app.renderer.gl);
+	                            this._effekseer.setRestorationOfStatesFlag(false);
+	                        }
+	                    } catch(e) {
+	                        console.error('[Effekseer] ctx init failed:', e.message);
+	                        this._effekseer = null; // keep _app alive
+	                    }
+	                }
+	            };
+	            console.log('[Sandbox] Effekseer compat patch applied');
+	        }
+	    }, 50);
+	    setTimeout(function(){ clearInterval(_check); }, 15000);
+	})();
+
+	// Scene_Boot stuck guard v2
+	(function(){
+		console.log('[VFS] Boot guard installed');
+		var _born = Date.now();
+		var _lastLog = 0;
+		var _t = setInterval(function(){
+			if (typeof SceneManager === 'undefined' || !SceneManager._scene) return;
+			var s = SceneManager._scene;
+			if (!s.constructor || s.constructor.name !== 'Scene_Boot') return;
+			var age = Math.round((Date.now() - _born) / 1000);
+			// Log diagnostic every 4s
+			if (age - _lastLog >= 4) {
+				_lastLog = age;
+				var f = [];
+				try { f.push('cfg=' + (typeof ConfigManager!=='undefined' && ConfigManager._loaded)); } catch(e) {}
+				try { f.push('gInfo=' + (typeof DataManager!=='undefined' && DataManager._globalInfoLoaded)); } catch(e) {}
+				try { f.push('db=' + (typeof DataManager!=='undefined' && DataManager.isDatabaseLoaded())); } catch(e) {}
+				try { f.push('fKeys=' + (typeof StorageManager!=='undefined' && StorageManager._forageKeysUpdated)); } catch(e) {}
+				try { f.push('font=' + (typeof FontManager!=='undefined' && FontManager._ready)); } catch(e) {}
+				try { f.push('sceneDB=' + !!s._databaseLoaded); } catch(e) {}
+				console.log('[VFS] Boot waiting ' + age + 's: ' + f.join(' '));
+			}
+			if (age < 12) return;
+			// Force unstuck
+			console.log('[VFS] Unstucking Scene_Boot...');
+			try { if (typeof ConfigManager !== 'undefined' && !ConfigManager._loaded) { ConfigManager._loaded = true; console.log('[VFS]   forced ConfigManager._loaded'); } } catch(e) {}
+			try { if (typeof DataManager !== 'undefined' && !DataManager._globalInfoLoaded) { DataManager._globalInfoLoaded = true; console.log('[VFS]   forced DataManager._globalInfoLoaded'); } } catch(e) {}
+			try { if (typeof StorageManager !== 'undefined' && !StorageManager._forageKeysUpdated) { StorageManager._forageKeysUpdated = true; console.log('[VFS]   forced StorageManager._forageKeysUpdated'); } } catch(e) {}
+			try { if (typeof FontManager !== 'undefined' && !FontManager._ready) { FontManager._ready = true; console.log('[VFS]   forced FontManager._ready'); } } catch(e) {}
+			try { if (!s._databaseLoaded) { s._databaseLoaded = true; console.log('[VFS]   forced scene._databaseLoaded'); } } catch(e) {}
+			console.log('[VFS] Scene_Boot unstuck complete');
+			clearInterval(_t);
+		}, 2000);
+		setTimeout(function(){ clearInterval(_t); }, 60000);
+	})();
+
 })();

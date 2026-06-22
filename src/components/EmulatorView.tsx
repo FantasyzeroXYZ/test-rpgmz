@@ -23,6 +23,10 @@ import { ConfirmModal } from "./ConfirmModal";
 // 模拟器桥接服务 — 完整的游戏加载与启动
 import { loadAndBootGame, shutdownGame, captureGameText, getEmulatorState } from "../services/emulatorBridge";
 
+// Module-level guard prevents React StrictMode double-mount from triggering
+// two VFS loads which would revoke blob URLs mid-script-load.
+let _emulatorLoading = false;
+
 // Filter styles mapping
 const FILTER_STYLES = {
   none: "",
@@ -100,6 +104,8 @@ export const EmulatorView: React.FC<EmulatorViewProps> = ({
   // 当进入游戏界面时，启动模拟器引擎
   React.useEffect(() => {
     if (!game?.id) return;
+    if (_emulatorLoading) return;
+    _emulatorLoading = true;
     setGameLoading(true);
     setLoadProgress(0);
     setLoadMessage('正在启动游戏引擎...');
@@ -114,7 +120,7 @@ export const EmulatorView: React.FC<EmulatorViewProps> = ({
       const result = await loadAndBootGame(game.id, container, (pct, msg) => {
         setLoadProgress(pct);
         setLoadMessage(msg);
-      });
+      }, game.system);
 
       if (result.success && result.iframe) {
         iframeRef.current = result.iframe;
