@@ -167,7 +167,7 @@ async function loadVfsDriver(): Promise<any | null> {
     // 使用 new Function() 构造动态 import，绕过 Rollup 构建时的静态分析
     // wasm_vfs.js 和 pkg/ 文件存放在 public/ 目录，由 Vite 作为静态文件服务
     const dynamicImport = new Function('specifier', 'return import(specifier)') as (s: string) => Promise<any>;
-    const vfsModule = await dynamicImport('/wasm_vfs.js');
+    const vfsModule = await dynamicImport(import.meta.env.BASE_URL + 'wasm_vfs.js');
     return vfsModule.WasmVFS;
   } catch (e) {
     console.warn('[emulatorBridge] WasmVFS 驱动加载失败，模拟器不可用:', e);
@@ -421,7 +421,7 @@ function buildFullSandboxDocument(gameHtml: string, vfs: any): string {
   // 注入：VFS 内联字体 + 多语言回退 CSS + 沙箱拦截脚本
   rewroteHtml = rewroteHtml.replace('</head>',
     fontCSS +
-    '<link rel="stylesheet" href="/fonts/fallback.css">\n' +
+    '<link rel="stylesheet" href="' + import.meta.env.BASE_URL + 'fonts/fallback.css">\n' +
     buildSandboxIIFE() + '\n</head>');
 
   return rewroteHtml;
