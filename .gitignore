@@ -1,10 +1,16 @@
+test-rpgmz-main/
+
+
 node_modules/
 target/
+dist/
 *.zip
 .DS_Store
 debug.log
 .claude/
 .history/
+legacy/
+test-rpgmz-main/
 # Keep pkg (WASM files needed for deployment)
 # Keep fonts (extracted game fonts)
 # Keep libs (offline CDN deps)

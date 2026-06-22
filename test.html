@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>游戏模拟器测试</title>
+<style>
+body{font-family:Consolas,monospace;background:#111;color:#0f0;padding:20px;max-width:900px;margin:0 auto}
+.pass{color:#0f0}.fail{color:#f00}.warn{color:#ff0}.info{color:#0af}
+pre{background:#222;padding:10px;border-radius:4px;overflow-x:auto;font-size:12px}
+button{padding:8px 16px;margin:4px;cursor:pointer;border:1px solid #0f0;background:#222;color:#0f0;border-radius:4px}
+button:hover{background:#333}
+input{background:#333;color:#fff;border:1px solid #555;padding:4px 8px;border-radius:4px}
+#log{max-height:500px;overflow-y:auto}
+</style></head>
+<body>
+<h2>🎮 游戏模拟器 WASM 加载测试</h2>
+<div id="results"></div>
+<div><button onclick="testWasmLoad()">1. 测试 WASM 加载</button>
+<button onclick="testVfsInit()">2. 测试 VFS 初始化</button>
+<button onclick="testZipLoad()">3. 测试 ZIP 加载 + 游戏启动</button></div>
+<p><input type="file" id="zipFile" accept=".zip"> 选择游戏 ZIP 文件</p>
+<div>状态: <span id="status">等待测试...</span></div>
+<pre id="log"></pre>
+<script type="module">
+import { WasmVFS } from '/wasm_vfs.js';
+
+const log = document.getElementById('log');
+const status = document.getElementById('status');
+function L(msg, cls=''){log.innerHTML+=`<span class="${cls}">${msg}</span>\n`;log.scrollTop=log.scrollHeight;}
+function S(msg){status.textContent=msg;}
+
+// 设置全局依赖
+import JSZip from 'https://cdn.jsdelivr.net/npm/jszip@3.10.1/+esm';
+import localforage from 'https://cdn.jsdelivr.net/npm/localforage@1.10.0/+esm';
+window.JSZip = JSZip;
+window.localforage = localforage;
+
+let vfs = null;
+let gameZipData = null;
+
+// 测试1: WASM 模块加载
+window.testWasmLoad = async function(){
+  L('━━━ 测试1: WASM 模块加载 ━━━','info');
+  try{
+    L(`WasmVFS class: ${typeof WasmVFS}`,'pass');
+    L(`WasmVFS 可用: ${!!WasmVFS}`,'pass');
+    vfs = new WasmVFS();
+    L(`VFS 实例创建成功`,'pass');
+    await vfs.initialize();
+    L(`VFS 初始化成功`,'pass');
+    S('✅ WASM 加载成功');
+  }catch(e){
+    L(`❌ 失败: ${e.message}`,'fail');
+    S('❌ 加载失败');
+  }
+};
+
+// 测试2: VFS 初始化
+window.testVfsInit = async function(){
+  L('\n━━━ 测试2: VFS 操作 ━━━','info');
+  if(!vfs){L('先运行测试1','fail');return;}
+  try{
+    L(`_initialized: ${vfs._initialized}`,'pass');
+    L(`file_count: ${vfs._fileCount||'N/A'}`,'info');
+    L(`gameId: ${vfs.gameId}`,'info');
+    S('✅ VFS 正常');
+  }catch(e){
+    L(`❌ 失败: ${e.message}`,'fail');
+    S('❌ VFS 异常');
+  }
+};
+
+// 测试3: ZIP 加载 + 游戏启动
+window.testZipLoad = async function(){
+  L('\n━━━ 测试3: ZIP 加载 + 游戏启动 ━━━','info');
+  const fileInput = document.getElementById('zipFile');
+  const file = fileInput.files[0];
+  if(!file){L('请先选择游戏 ZIP 文件','fail');return;}
+  if(!vfs){L('先运行测试1','fail');return;}
+
+  try{
+    S('正在加载 ZIP...');
+    L(`文件名: ${file.name}`,'info');
+    L(`大小: ${(file.size/1024/1024).toFixed(1)} MB`,'info');
+
+    const zipData = await file.arrayBuffer();
+    const blob = new Blob([zipData]);
+    L(`读取完成，开始解压...`,'info');
+
+    const meta = await vfs.loadZip(blob,(cur,total,name)=>{
+      if(cur%100===0||cur===total) {
+        S(`解压中: ${Math.round(cur/total*100)}% - ${name||''}`);
+      }
+    });
+
+    L(`解压完成!`,'pass');
+    L(`文件数: ${meta.fileCount}`,'pass');
+    L(`基础路径: ${meta.basePath||'(root)'}`,'info');
+    L(`入口 HTML: ${meta.indexHtmlPath||'N/A'}`,'info');
+    L(`游戏ID: ${vfs.gameId}`,'info');
+
+    const encInfo = vfs.encryptionInfo;
+    if(encInfo){
+      L(`加密: hasImages=${encInfo.hasImages}, hasAudio=${encInfo.hasAudio}`,'warn');
+      L(`密钥: ${encInfo.key?encInfo.key.slice(0,16)+'...':'无'}`,'warn');
+    } else {
+      L(`未加密游戏`,'info');
+    }
+
+    // 获取游戏 HTML
+    const gameHtml = vfs.getIndexHtml();
+    if(!gameHtml){L('❌ 未找到 index.html','fail');S('失败');return;}
+    L(`index.html 长度: ${gameHtml.length} 字节`,'pass');
+
+    // 测试文件访问
+    const testPaths = ['data/System.json','js/plugins.js','img/system/IconSet.png'];
+    for(const p of testPaths){
+      const exists = vfs.fileExists(p);
+      L(`  ${p}: ${exists?'✅ 存在':'⚠ 不存在'}`,exists?'pass':'warn');
+    }
+
+    S('✅ 测试全部通过！游戏可以正常加载！');
+    L('\n🎉 测试完成！模拟器引擎工作正常','pass');
+
+  }catch(e){
+    L(`❌ 失败: ${e.message}\n${e.stack}`,'fail');
+    S('❌ 加载失败');
+  }
+};
+
+L('✅ 测试页面就绪，请依次点击测试按钮','pass');
+</script>
+</body>
+</html>

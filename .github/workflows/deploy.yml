@@ -4,10 +4,6 @@ on:
   workflow_dispatch:
   push:
     branches: [ "main", "master" ]
-  push:
-    branches: [ "gh-pages" ]
-  schedule:
-    - cron: '0 2 * * 0'
 
 permissions:
   contents: read
@@ -24,90 +20,83 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
-          fetch-depth: 0
+          node-version: '20'
+          cache: 'npm'
 
-      - name: Setup Pages
-        id: pages
-        uses: actions/configure-pages@v4
+      - name: Install dependencies
+        run: npm ci
 
-      - name: Create necessary files
+      - name: Build
+        run: npm run build
+
+      - name: Prepare GitHub Pages artifact
         run: |
-          echo "Creating .nojekyll file..."
-          touch .nojekyll
+          # .nojekyll — tell GitHub Pages not to process this as Jekyll site
+          touch dist/.nojekyll
 
-          echo "Creating 404.html file..."
-          cat > 404.html << 'EOF'
+          # SPA-aware 404.html — handles client-side routing on GitHub Pages
+          cat > dist/404.html << 'HTMLEOF'
           <!DOCTYPE html>
           <html lang="en">
           <head>
-              <meta charset="UTF-8">
-              <meta name="viewport" content="width=device-width, initial-scale=1.0">
-              <title>RPGMZ Player - Page Not Found</title>
-              <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🎮</text></svg>">
-              <style>
-                  *{margin:0;padding:0;box-sizing:border-box}
-                  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Oxygen,Ubuntu,Cantarell,sans-serif;background:linear-gradient(135deg,#1e1e1e 0%,#252526 100%);color:#fff;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px;text-align:center}
-                  .container{max-width:600px;width:100%;padding:40px;background:rgba(37,37,38,0.9);border-radius:16px;box-shadow:0 8px 32px rgba(0,0,0,0.3);border:1px solid #333}
-                  h1{font-size:120px;margin-bottom:20px;color:#0e639c;font-weight:800;line-height:1}
-                  h2{font-size:28px;margin-bottom:20px;color:#fff;font-weight:600}
-                  p{font-size:16px;line-height:1.6;color:#aaa;margin-bottom:30px}
-                  .game-icon{font-size:60px;margin-bottom:20px;display:block}
-                  .button-group{display:flex;gap:15px;justify-content:center;flex-wrap:wrap;margin-top:30px}
-                  .btn{display:inline-block;padding:12px 28px;background:#0e639c;color:white;text-decoration:none;border-radius:8px;font-weight:600;font-size:16px;transition:all .3s ease;border:none;cursor:pointer}
-                  .btn:hover{background:#1177bb;transform:translateY(-2px);box-shadow:0 6px 20px rgba(14,99,156,0.4)}
-                  .btn-secondary{background:#444}.btn-secondary:hover{background:#555}
-                  .spinner{display:inline-block;width:20px;height:20px;border:3px solid rgba(255,255,255,0.3);border-radius:50%;border-top-color:#0e639c;animation:spin 1s ease-in-out infinite;margin-right:10px}
-                  @keyframes spin{to{transform:rotate(360deg)}}
-                  .redirect-text{display:flex;align-items:center;justify-content:center;margin-top:30px;color:#888;font-size:14px}
-                  @media (max-width:768px){.container{padding:30px 20px}h1{font-size:80px}h2{font-size:24px}.button-group{flex-direction:column;align-items:center}.btn{width:100%;max-width:300px}}
-              </style>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>RPGMZ Player</title>
+            <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🎮</text></svg>">
+            <style>
+              *{margin:0;padding:0;box-sizing:border-box}
+              body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#05070a;color:#fff;min-height:100vh;display:flex;align-items:center;justify-content:center;text-align:center}
+              .container{padding:40px;background:rgba(255,255,255,0.02);border-radius:16px;border:1px solid rgba(255,255,255,0.05)}
+              h1{font-size:80px;color:#06b6d4;font-weight:800}
+              h2{font-size:24px;margin:16px 0;font-weight:600}
+              p{font-size:14px;color:#888;margin-bottom:24px}
+              a{color:#06b6d4;text-decoration:none;font-weight:600}
+              .spinner{display:inline-block;width:16px;height:16px;border:2px solid rgba(255,255,255,0.2);border-radius:50%;border-top-color:#06b6d4;animation:spin 1s linear infinite;margin-right:8px;vertical-align:middle}
+              @keyframes spin{to{transform:rotate(360deg)}}
+            </style>
           </head>
           <body>
-              <div class="container">
-                  <span class="game-icon">🎮</span>
-                  <h1>404</h1>
-                  <h2>Page Not Found</h2>
-                  <p>The page you're looking for doesn't exist or has been moved. You'll be redirected to the main page.</p>
-                  <div class="button-group">
-                      <a href="/" class="btn">Go to Homepage</a>
-                      <a href="javascript:history.back()" class="btn btn-secondary">Go Back</a>
-                  </div>
-                  <div class="redirect-text"><div class="spinner"></div><span>Redirecting to homepage...</span></div>
-              </div>
-              <script>
-              (function(){
-                  const redirect=sessionStorage.redirect;
-                  const timestamp=sessionStorage.redirectTime;
-                  const now=Date.now();
-                  if(redirect&&timestamp&&(now-parseInt(timestamp))<300000){
-                      delete sessionStorage.redirect;delete sessionStorage.redirectTime;
-                      const cr=redirect.replace(/\/\/+/g,'/');
-                      if(cr!==location.pathname){history.replaceState(null,null,cr);location.reload();return}
-                  }
-                  let c=3;const t=document.querySelector('.redirect-text span');
-                  const i=setInterval(()=>{if(c<=0){clearInterval(i);location.replace('/')}else{t.textContent='Redirecting to homepage in '+c+' seconds...';c--}},1000);
-                  setTimeout(()=>{location.replace('/')},3000);
-              })();
-              if(location.pathname!=='/'){sessionStorage.redirect=location.pathname;sessionStorage.redirectTime=Date.now()}
-              </script>
+            <div class="container">
+              <h1>404</h1>
+              <h2>Page Not Found</h2>
+              <p>The page you're looking for doesn't exist or has been moved.</p>
+              <p><a href="/">← Back to Home</a></p>
+              <p style="margin-top:24px;font-size:12px;color:#555"><span class="spinner"></span>Redirecting…</p>
+            </div>
+            <script>
+            (function(){
+              // SPA fallback: save the attempted path and redirect to root
+              // The app can restore it via sessionStorage.redirect
+              var path = location.pathname + location.search + location.hash;
+              if (path !== '/') {
+                sessionStorage.setItem('redirect', path);
+                sessionStorage.setItem('redirectTime', Date.now());
+              }
+              setTimeout(function(){ location.replace('/'); }, 1500);
+            })();
+            </script>
           </body>
           </html>
-          EOF
+          HTMLEOF
 
+          # Optional: CNAME for custom domain (set via repo Variables)
           if [ -n "${{ vars.CUSTOM_DOMAIN }}" ]; then
-            echo "${{ vars.CUSTOM_DOMAIN }}" > CNAME
+            echo "${{ vars.CUSTOM_DOMAIN }}" > dist/CNAME
           fi
 
-          echo "Verifying required files..."
-          ls -la index.html sw.js 404.html .nojekyll
-          echo "File sizes:"
-          du -h index.html sw.js 404.html
+          echo "=== Build output contents ==="
+          ls -la dist/
+          echo "=== Key files ==="
+          ls -la dist/index.html dist/404.html dist/.nojekyll 2>/dev/null || true
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: .
+          path: dist/
 
   deploy:
     environment:
