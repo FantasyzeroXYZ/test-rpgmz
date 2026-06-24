@@ -13,7 +13,41 @@ window.addEventListener('unhandledrejection',function(e){
     try{window.parent.postMessage({source:'iframe-game',type:'game-error',message:'Promise: '+String(e.reason),stack:(e.reason&&e.reason.stack)?e.reason.stack:'(no stack)'},'*');}catch(e2){}
 });
 console.log('[VFS Sandbox] IIFE starting, VFS available:',!!getVfs());
-	(function _vfsCheck(n){
+// ── MV boot diagnostics ──
+(function(){var _s=Date.now();var _c=setInterval(function(){
+var a=Math.round((Date.now()-_s)/1000);
+var sm=typeof SceneManager!=='undefined';
+var sc=sm&&SceneManager._scene;
+var sn=sc&&sc.constructor?sc.constructor.name:'?';
+var dm=typeof DataManager!=='undefined';
+var db=dm&&typeof DataManager.isDatabaseLoaded==='function'?DataManager.isDatabaseLoaded():false;
+var gi=dm&&DataManager._globalInfoLoaded;
+var imr=typeof ImageManager!=='undefined'&&typeof ImageManager.isReady==='function'?ImageManager.isReady():'?';
+var fnt=(typeof Graphics!=='undefined'&&typeof Graphics.isFontLoaded==='function')?Graphics.isFontLoaded('GameFont'):'?';
+console.log('[MV-BOOT '+a+'s] scene='+sn+' db='+db+' imgReady='+imr+' fontOk='+fnt);
+if(sc&&sn!=='Scene_Boot'){console.log('[MV-BOOT] Reached '+sn+'!');clearInterval(_c);}
+if(a>60){console.log('[MV-BOOT] Timed out');clearInterval(_c);}
+},3000);})();
+// ── Track window.onload ──
+var _bootStart=Date.now();
+// Poll for window.onload being set (game scripts may set it after sandbox runs,
+// or before — in either case we'll detect it)
+var _onloadCheck=setInterval(function(){
+if(typeof window.onload==='function'&&!_onloadWrapped){
+_onloadWrapped=true;clearInterval(_onloadCheck);
+console.log('[MV-BOOT] window.onload SET as function at '+(Date.now()-_bootStart)+'ms');
+var _orig=window.onload;
+window.onload=function(e){
+console.log('[MV-BOOT] window.onload FIRED at '+(Date.now()-_bootStart)+'ms');
+try{return _orig.call(this,e);}catch(ex){console.error('[MV-BOOT] onload error:',ex);}
+};
+}
+},10);
+var _onloadWrapped=false;
+// Direct load event listener as backup
+window.addEventListener('load',function(){console.log('[MV-BOOT] load EVENT at '+(Date.now()-_bootStart)+'ms, ready='+document.readyState);});
+document.addEventListener('DOMContentLoaded',function(){console.log('[MV-BOOT] DOMContentLoaded at '+(Date.now()-_bootStart)+'ms');});
+(function _vfsCheck(n){
     var v=getVfs();
     console.log('[VFS-CHECK#'+n+'] vfs='+!!v+' parent='+!!(window.parent&&window.parent!==window)+' ref='+!!(window.parent&&window.parent.__vfsRef)+' init='+(window.parent&&window.parent.__vfsRef&&window.parent.__vfsRef._initialized));
     if(v){console.log('[VFS-CHECK#'+n+'] basePath='+(v._basePath||'(root)')+' pixi='+v.fileExists('js/libs/pixi.js')+' main='+v.fileExists('js/main.js')+' eff='+v.fileExists('js/libs/effekseer.min.js'));}
@@ -64,8 +98,21 @@ window.fetch=function(input,init){
     }
     return _origFetch.apply(this,arguments);
 };
-// XHR interception
+// XHR interception — guard responseType globally (once) to prevent sync-XHR crashes
 var OrigXHR=window.XMLHttpRequest;
+(function(){
+    var _rtDesc=Object.getOwnPropertyDescriptor(XMLHttpRequest.prototype,'responseType');
+    if(_rtDesc&&_rtDesc.set){
+        var _origSetRT=_rtDesc.set;
+        Object.defineProperty(XMLHttpRequest.prototype,'responseType',{
+            get:function(){return this._vfsXhrRT!==undefined?this._vfsXhrRT:'';},
+            set:function(v){
+                try{_origSetRT.call(this,v);this._vfsXhrRT=v;}catch(e){this._vfsXhrRT=v;}
+            },
+            configurable:true,enumerable:true
+        });
+    }
+})();
 window.XMLHttpRequest=function(){
     var xhr=new OrigXHR();
     var _open=xhr.open,_send=xhr.send;
@@ -94,19 +141,21 @@ window.XMLHttpRequest=function(){
         var vfs=getVfs();
         if(!vfs||!vfs.fileExists(normPath)){_intercepted=false;return _send.call(this,body);}
         var data=vfs.readRawFile(normPath);
+        // responseType may fail on sync XHR — _vfsXhrRT is set by global guard
+        var _rt=xhr.responseType!==''?xhr.responseType:(xhr._vfsXhrRT||'');
         Object.defineProperty(xhr,'readyState',{get:function(){return 4;},configurable:true});
         Object.defineProperty(xhr,'status',{get:function(){return 200;},configurable:true});
         Object.defineProperty(xhr,'statusText',{get:function(){return 'OK';},configurable:true});
-        if(xhr.responseType===''||xhr.responseType==='text'){
+        if(_rt===''||_rt==='text'){
             var decoder=new TextDecoder('utf-8');
             var text=decoder.decode(data);
             Object.defineProperty(xhr,'responseText',{get:function(){return text;},configurable:true});
             Object.defineProperty(xhr,'response',{get:function(){return text;},configurable:true});
-        }else if(xhr.responseType==='json'){
+        }else if(_rt==='json'){
             var decoder2=new TextDecoder('utf-8');
             try{var json=JSON.parse(decoder2.decode(data));Object.defineProperty(xhr,'response',{get:function(){return json;},configurable:true});}
             catch(e){Object.defineProperty(xhr,'response',{get:function(){return null;},configurable:true});}
-        }else if(xhr.responseType==='arraybuffer'){
+        }else if(_rt==='arraybuffer'){
             // Safe copy: data.buffer may be larger if data is a Uint8Array view
             var buf=data.buffer.slice(data.byteOffset,data.byteOffset+data.byteLength);
             Object.defineProperty(xhr,'response',{get:function(){return buf;},configurable:true});

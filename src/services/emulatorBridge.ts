@@ -25,6 +25,8 @@ import localforage from 'localforage';
 // 从 test-rpgmz-main 原始项目搬运的沙箱 IIFE 代码（内联加载，保证同步执行）
 // @ts-ignore - Vite raw import
 import sandboxCode from "../../public/sandbox.js?raw";
+// @ts-ignore - Vite raw import
+import fallbackCSS from "../../public/fonts/fallback.css?raw";
 
 
 // 扩展 Window 类型以支持游戏文本捕获
@@ -256,7 +258,7 @@ export async function loadAndBootGame(
       return { success: false, error: '压缩包中未找到 index.html' };
     }
 
-    const sandboxedHtml = buildFullSandboxDocument(gameHtml, vfsInstance);
+    const sandboxedHtml = buildFullSandboxDocument(gameHtml, vfsInstance, engineType);
 
     // 6. 创建 iframe 并注入沙箱 HTML
     // allow-same-origin 是必需的：srcdoc iframe 需要它才能访问 parent window、加载 blob URL
@@ -344,17 +346,13 @@ function buildFontFaceCSS(vfs: any): string {
   } catch(e) { return ''; }
 }
 
-function buildFullSandboxDocument(gameHtml: string, vfs: any): string {
-  // 以下代码直接从旧项目（legacy/index.html）的 buildSandboxDocument 函数搬运
-  // 确保与已验证可运行的逻辑完全一致
+function buildFullSandboxDocument(gameHtml: string, vfs: any, _engineType?: string): string {
+  // ★ 与旧项目（legacy/index.html buildSandboxDocument）完全一致
+  // 不做任何额外注入——旧项目已验证此逻辑能正常运行 MV/MZ 游戏
   let rewroteHtml = gameHtml;
-
-  // 0. 提取 VFS 字体文件，生成内联 @font-face（在游戏 CSS 加载前注入）
-  const fontCSS = buildFontFaceCSS(vfs);
 
   // =====================================================================
   // Step 1: 重写 <script src="..."> → blob URL
-  // 使用旧项目已验证的正则和替换逻辑，增加调试日志
   // =====================================================================
   let vfsTotal=0, vfsFound=0;
   rewroteHtml = rewroteHtml.replace(
@@ -362,17 +360,13 @@ function buildFullSandboxDocument(gameHtml: string, vfs: any): string {
     (match, before, url, after) => {
       vfsTotal++;
       const normPath = vfs.normalizePath(url);
-      const found = vfs.fileExists(normPath);
-      // 如果常规路径未找到，尝试使用 _resolvePath 的完整模糊匹配
-      const resolved = found ? normPath : vfs._resolvePath(normPath);
-      if (resolved) {
+      if (vfs.fileExists(normPath)) {
         vfsFound++;
-        const blobUrl = vfs.createMediaUrl(resolved, 'application/javascript');
+        const blobUrl = vfs.createMediaUrl(normPath, 'application/javascript');
         if (blobUrl) {
           return before.replace('<script', '<script data-vfs-original="' + url + '"') + blobUrl + after;
         }
       }
-      // 文件未找到，保留原始标签并记录警告
       console.warn('[Sandbox] Script not in VFS: ' + url + ' (norm=' + normPath + ', basePath=' + (vfs._basePath||'') + ')');
       return match;
     }
@@ -391,6 +385,7 @@ function buildFullSandboxDocument(gameHtml: string, vfs: any): string {
 
   // =====================================================================
   // Step 3: 重写 <link href="..."> → 内联 <style> + CSS url() 改写
+  // (与 legacy/index.html 完全相同的逻辑)
   // =====================================================================
   rewroteHtml = rewroteHtml.replace(
     /(<link\b[^>]*\brel\s*=\s*["']stylesheet["'][^>]*\shref\s*=\s*["'])([^"']+)(["'][^>]*>)/gi,
@@ -405,23 +400,14 @@ function buildFullSandboxDocument(gameHtml: string, vfs: any): string {
               const cssDir = normPath.substring(0, normPath.lastIndexOf('/') + 1);
               let resolved = assetUrl;
               if (!/^(https?:|data:|blob:|\/)/i.test(assetUrl)) resolved = cssDir + assetUrl;
-              // 尝试多种路径解析（字体可能在 CSS 目录下，也可能在游戏根目录下）
-              const candidates = [
-                vfs.normalizePath(resolved),
-                vfs.normalizePath(assetUrl),  // 相对于游戏根目录
-              ];
-              for (const c of candidates) {
-                if (vfs.fileExists(c)) {
-                  const blobUrl = vfs.createMediaUrl(c);
-                  if (blobUrl) return 'url(' + blobUrl + ')';
-                }
+              const assetNorm = vfs.normalizePath(resolved);
+              if (vfs.fileExists(assetNorm)) {
+                const blobUrl = vfs.createMediaUrl(assetNorm);
+                if (blobUrl) return 'url(' + blobUrl + ')';
               }
               return m;
             }
           );
-          const cssBlob = new Blob([rewroteCss], { type: 'text/css' });
-          const cssBlobUrl = URL.createObjectURL(cssBlob);
-          vfs._activeBlobUrls.add(cssBlobUrl);
           return '<style>' + rewroteCss + '</style>';
         }
       }
@@ -430,12 +416,9 @@ function buildFullSandboxDocument(gameHtml: string, vfs: any): string {
   );
 
   // =====================================================================
-  // Step 4: 注入沙箱拦截脚本（与旧项目完全一致的 IIFE）
+  // Step 4: 注入沙箱脚本 (与 legacy 完全一致，仅此一项)
   // =====================================================================
-  // 注入：VFS 内联字体 + 多语言回退 CSS + 沙箱拦截脚本
   rewroteHtml = rewroteHtml.replace('</head>',
-    fontCSS +
-    '<link rel="stylesheet" href="' + import.meta.env.BASE_URL + 'fonts/fallback.css">\n' +
     buildSandboxIIFE() + '\n</head>');
 
   return rewroteHtml;
@@ -445,6 +428,11 @@ function buildSandboxIIFE(): string {
   // 沙箱代码内联加载（与 test-rpgmz-main 原始项目一致）
   // 必须内联以确保拦截器在游戏脚本加载前同步安装
   return '<script>\n' + sandboxCode + '\n</scr' + 'ipt>';
+}
+
+/** 内联 fallback.css，避免外部 <link> 阻塞 iframe 的 window.onload（MV 游戏靠 onload 启动引擎） */
+function getFallbackCSS(): string {
+  return fallbackCSS;
 }
 
 // 游戏文本捕获
@@ -511,10 +499,12 @@ export function isEmulatorReady(): boolean {
 // ============================================================================
 
 export function libraryEntryToGameEntry(entry: LibraryEntry): GameEntry {
+  // MV 游戏以 www/ 为 basePath，MZ 则直接在根目录
+  const engineType = (entry as any).engineType || 'RPGMZ';
   return {
     id: entry.id,
     title: entry.name || '未命名游戏',
-    system: 'rpgmz',
+    system: engineType,
     coverUrl: entry.thumbnail || '',
     lastPlayed: entry.lastPlayed ? new Date(entry.lastPlayed).toLocaleDateString() : '未玩过',
     createdAt: entry.addedAt ? new Date(entry.addedAt).toISOString().split('T')[0] : '',

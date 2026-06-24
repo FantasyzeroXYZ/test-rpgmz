@@ -35,6 +35,25 @@ const DPAD_KEY_EVENTS: Record<string, Record<string, string>> = {
   arrows: { U: 'ArrowUp', D: 'ArrowDown', L: 'ArrowLeft', R: 'ArrowRight' },
 };
 
+/** 用 addEventListener({ passive: false }) 避免 touch 事件中 preventDefault 的警告 */
+function useTouchRef(onPress: (e: React.MouseEvent | React.TouchEvent) => void, onRelease: () => void) {
+  const ref = React.useRef<HTMLButtonElement>(null);
+  const pressRef = React.useRef(onPress);
+  const releaseRef = React.useRef(onRelease);
+  pressRef.current = onPress;
+  releaseRef.current = onRelease;
+  React.useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const ts = (e: TouchEvent) => { e.preventDefault(); pressRef.current(e); };
+    const te = () => releaseRef.current();
+    el.addEventListener('touchstart', ts, { passive: false });
+    el.addEventListener('touchend', te);
+    return () => { el.removeEventListener('touchstart', ts); el.removeEventListener('touchend', te); };
+  }, []);
+  return ref;
+}
+
 export const VirtualGamepad: React.FC<VirtualGamepadProps> = ({
   hiddenButtons = [],
   opacity = 100,
@@ -109,6 +128,12 @@ export const VirtualGamepad: React.FC<VirtualGamepadProps> = ({
   const handleRelease = (btn: string) => () => {
     sendInput(btn, false);
   };
+
+  // 非 passive touch refs（避免 "Unable to preventDefault" 警告）
+  const selRef = useTouchRef(handlePress('Select'), handleRelease('Select'));
+  const startRef = useTouchRef(handlePress('Start'), handleRelease('Start'));
+  const lbRef = useTouchRef(handlePress('L1'), handleRelease('L1'));
+  const rbRef = useTouchRef(handlePress('R1'), handleRelease('R1'));
 
   return (
     <div
@@ -190,12 +215,11 @@ export const VirtualGamepad: React.FC<VirtualGamepadProps> = ({
         {!hiddenButtons.includes('Select') ? (
           <div className="flex flex-col items-center gap-1">
             <motion.button
+              ref={selRef}
               whileTap={{ scale: 0.9, backgroundColor: 'rgba(255,255,255,0.2)' }}
               onMouseDown={handlePress('Select')}
               onMouseUp={handleRelease('Select')}
               onMouseLeave={handleRelease('Select')}
-              onTouchStart={handlePress('Select')}
-              onTouchEnd={handleRelease('Select')}
               className="w-14 h-5 bg-white/10 rounded-full border border-white/10 flex items-center justify-center"
             >
               {getMappedKey('Select') && <span className="text-[7px] font-mono text-white/50">{getMappedKey('Select')}</span>}
@@ -207,12 +231,11 @@ export const VirtualGamepad: React.FC<VirtualGamepadProps> = ({
         {!hiddenButtons.includes('Start') ? (
           <div className="flex flex-col items-center gap-1">
             <motion.button
+              ref={startRef}
               whileTap={{ scale: 0.9, backgroundColor: 'rgba(255,255,255,0.3)' }}
               onMouseDown={handlePress('Start')}
               onMouseUp={handleRelease('Start')}
               onMouseLeave={handleRelease('Start')}
-              onTouchStart={handlePress('Start')}
-              onTouchEnd={handleRelease('Start')}
               className="w-14 h-5 bg-white/20 rounded-full border border-white/10 flex items-center justify-center"
             >
               {getMappedKey('Start') && <span className="text-[7px] font-mono text-white/60">{getMappedKey('Start')}</span>}
@@ -226,12 +249,11 @@ export const VirtualGamepad: React.FC<VirtualGamepadProps> = ({
       <div className="absolute top-16 md:top-24 inset-x-6 md:inset-x-12 flex justify-between pointer-events-auto scale-75 md:scale-100">
         {!hiddenButtons.includes('L1') ? (
           <motion.button
+            ref={lbRef}
             whileTap={{ scale: 0.95, backgroundColor: 'rgba(255,255,255,0.15)' }}
             onMouseDown={handlePress('L1')}
             onMouseUp={handleRelease('L1')}
             onMouseLeave={handleRelease('L1')}
-            onTouchStart={handlePress('L1')}
-            onTouchEnd={handleRelease('L1')}
             className="w-24 h-9 bg-white/5 rounded-2xl border border-white/10 flex flex-col justify-center px-4"
           >
             <span className="text-[10px] font-black text-white/30 italic">LB</span>
@@ -241,12 +263,11 @@ export const VirtualGamepad: React.FC<VirtualGamepadProps> = ({
 
         {!hiddenButtons.includes('R1') ? (
           <motion.button
+            ref={rbRef}
             whileTap={{ scale: 0.95, backgroundColor: 'rgba(255,255,255,0.15)' }}
             onMouseDown={handlePress('R1')}
             onMouseUp={handleRelease('R1')}
             onMouseLeave={handleRelease('R1')}
-            onTouchStart={handlePress('R1')}
-            onTouchEnd={handleRelease('R1')}
             className="w-24 h-9 bg-white/5 rounded-2xl border border-white/10 flex flex-col justify-center items-end px-4"
           >
             <span className="text-[10px] font-black text-white/30 italic">RB</span>
@@ -285,14 +306,29 @@ const DpadButton: React.FC<{
   onRelease: () => void;
 }> = ({ label, keyHint, onPress, onRelease }) => {
   const colors = DPAD_COLORS['up']!;
+  const btnRef = React.useRef<HTMLButtonElement>(null);
+
+  // 用 addEventListener({ passive: false }) 避免 "Unable to preventDefault" 警告
+  React.useEffect(() => {
+    const el = btnRef.current;
+    if (!el) return;
+    const handleTouchStart = (e: TouchEvent) => { e.preventDefault(); onPress(e); };
+    const handleTouchEnd = () => onRelease();
+    el.addEventListener('touchstart', handleTouchStart, { passive: false });
+    el.addEventListener('touchend', handleTouchEnd);
+    return () => {
+      el.removeEventListener('touchstart', handleTouchStart);
+      el.removeEventListener('touchend', handleTouchEnd);
+    };
+  }, [onPress, onRelease]);
+
   return (
     <motion.button
+      ref={btnRef}
       whileTap={{ scale: 0.9, backgroundColor: colors.activeBg }}
       onMouseDown={onPress}
       onMouseUp={onRelease}
       onMouseLeave={onRelease}
-      onTouchStart={onPress}
-      onTouchEnd={onRelease}
       className={`w-12 h-12 rounded-xl flex flex-col items-center justify-center border font-black text-sm transition-all pointer-events-auto cursor-pointer ${colors.bg} ${colors.border} ${colors.text}`}
     >
       <span className="leading-none">{label}</span>
@@ -328,14 +364,28 @@ const XboxButton: React.FC<{
 }> = ({ label, color, mappedKey, onPress, onRelease }) => {
   const c = XBOX_COLORS[color]!;
   const activeBg = XBOX_ACTIVE[color]!;
+  const btnRef = React.useRef<HTMLButtonElement>(null);
+
+  React.useEffect(() => {
+    const el = btnRef.current;
+    if (!el) return;
+    const handleTouchStart = (e: TouchEvent) => { e.preventDefault(); onPress(e); };
+    const handleTouchEnd = () => onRelease();
+    el.addEventListener('touchstart', handleTouchStart, { passive: false });
+    el.addEventListener('touchend', handleTouchEnd);
+    return () => {
+      el.removeEventListener('touchstart', handleTouchStart);
+      el.removeEventListener('touchend', handleTouchEnd);
+    };
+  }, [onPress, onRelease]);
+
   return (
     <motion.button
+      ref={btnRef}
       whileTap={{ scale: 0.9, backgroundColor: activeBg }}
       onMouseDown={onPress}
       onMouseUp={onRelease}
       onMouseLeave={onRelease}
-      onTouchStart={onPress}
-      onTouchEnd={onRelease}
       className={`w-12 h-12 rounded-full flex flex-col items-center justify-center border-2 font-black text-sm transition-all pointer-events-auto cursor-pointer ${c.bg} ${c.border} ${c.text} ${c.shadow}`}
     >
       <span className="leading-none text-base">{label}</span>

@@ -136,6 +136,11 @@ export const HomeView: React.FC<HomeViewProps> = ({
         }
       );
 
+      // 根据 basePath 判断引擎类型：MV 游戏资源在 www/ 子目录，MZ 在根目录
+      const engineType = meta.basePath && meta.basePath.includes('www')
+        ? 'RPGMV' : 'RPGMZ';
+      console.log('[HomeView] 引擎类型:', engineType, 'basePath:', meta.basePath, 'indexHtml:', meta.indexHtmlPath);
+
       setImportProgress(80);
       setImportMessage('提取封面图...');
 
@@ -145,7 +150,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
       setImportProgress(95);
       setImportMessage('保存到游戏库...');
 
-      // 存储到 IndexedDB（含原始 ZIP 数据和加密密钥）
+      // 存储到 IndexedDB（含原始 ZIP 数据、加密密钥和引擎类型）
       const encKey = vfs.encryptionInfo ? vfs.encryptionInfo.key : '';
       await libraryAdd(newId, {
         name: nameWithoutExt,
@@ -155,6 +160,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
         thumbnail,
         hasEncryption: !!vfs.encryptionInfo,
         encryptionKey: encKey,
+        engineType,
       }, zipData);
 
       // 刷新游戏列表
