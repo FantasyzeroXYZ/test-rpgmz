@@ -2284,6 +2284,39 @@ export const GamepadSettings = ({
               />
             </div>
 
+            {/* D-Pad 方向键映射模式 */}
+            <div className="flex items-center justify-between pt-1 pb-2 border-b border-dashed border-slate-100 dark:border-white/5">
+              <span className={`text-[10px] font-black uppercase tracking-wider ${isLight ? "text-slate-500" : "text-slate-400"}`}>
+                方向键映射
+              </span>
+              <div className="flex gap-1">
+                <button
+                  onClick={() => setUIState({ gamepadDpadMode: 'arrows' })}
+                  className={`px-3 py-1.5 rounded-lg text-[10px] font-bold transition-all ${
+                    uiState.gamepadDpadMode === 'arrows'
+                      ? 'bg-cyan-500/20 border border-cyan-400/40 text-cyan-400'
+                      : isLight
+                        ? 'bg-slate-100 border border-slate-200 text-slate-500'
+                        : 'bg-white/5 border border-white/5 text-slate-500'
+                  }`}
+                >
+                  ↑↓←→ 方向键
+                </button>
+                <button
+                  onClick={() => setUIState({ gamepadDpadMode: 'wasd' })}
+                  className={`px-3 py-1.5 rounded-lg text-[10px] font-bold transition-all ${
+                    uiState.gamepadDpadMode === 'wasd'
+                      ? 'bg-cyan-500/20 border border-cyan-400/40 text-cyan-400'
+                      : isLight
+                        ? 'bg-slate-100 border border-slate-200 text-slate-500'
+                        : 'bg-white/5 border border-white/5 text-slate-500'
+                  }`}
+                >
+                  W A S D
+                </button>
+              </div>
+            </div>
+
             {/* Hidden Button Selection */}
             <div className="space-y-2">
               <span

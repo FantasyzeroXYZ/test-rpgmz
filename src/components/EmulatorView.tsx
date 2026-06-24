@@ -355,10 +355,11 @@ export const EmulatorView: React.FC<EmulatorViewProps> = ({
             </div>
 
             {uiState.showVirtualGamepad && (
-              <VirtualGamepad 
-                hiddenButtons={uiState.gamepadHiddenButtons} 
+              <VirtualGamepad
+                hiddenButtons={uiState.gamepadHiddenButtons}
                 opacity={uiState.gamepadOpacity ?? 100}
                 mappings={uiState.gamepadMappings ?? {}}
+                dpadMode={uiState.gamepadDpadMode ?? 'arrows'}
               />
             )}
 

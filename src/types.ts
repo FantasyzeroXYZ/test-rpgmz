@@ -83,6 +83,8 @@ export interface UIState {
   gamepadHiddenButtons: string[];
   gamepadOpacity?: number;
   gamepadMappings?: Record<string, string>;
+  /** D-Pad 方向键映射模式: 'wasd' | 'arrows' */
+  gamepadDpadMode: 'wasd' | 'arrows';
   // Translation Configuration
   showTranslation: boolean;
   autoTranslate: boolean;

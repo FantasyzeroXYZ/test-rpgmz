@@ -93,6 +93,7 @@ export default function App() {
     showVirtualGamepad: false,
     gamepadHiddenButtons: [],
     gamepadOpacity: 100,
+    gamepadDpadMode: 'arrows',
     gamepadMappings: {
       U: 'W',
       D: 'S',
