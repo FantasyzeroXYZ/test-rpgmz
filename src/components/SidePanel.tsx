@@ -618,9 +618,8 @@ const EnhancedSettings = ({
                       }
                       className={`w-full rounded-xl py-2 px-3 text-xs outline-none transition-all font-sans font-semibold border ${isLight ? "bg-slate-50 border-slate-200 text-slate-805" : "bg-white/5 border-white/10 text-white bg-[#0e121a]"}`}
                     >
-                      <option value="ui">
-                        跟随界面语言 (Follow UI Language)
-                      </option>
+                      <option value="game">跟随游戏设置</option>
+                      <option value="system">跟随系统设置</option>
                       <option value="custom">自定义（可以选语言）</option>
                     </select>
                   </div>
@@ -666,8 +665,9 @@ const EnhancedSettings = ({
                       }
                       className={`w-full rounded-xl py-2 px-3 text-xs outline-none transition-all font-sans font-semibold border ${isLight ? "bg-slate-50 border-slate-200 text-slate-805" : "bg-white/5 border-white/10 text-white bg-[#0e121a]"}`}
                     >
-                      <option value="game">跟随游戏设置</option>
-                      <option value="system">跟随系统设置</option>
+                      <option value="ui">
+                        跟随界面语言 (Follow UI Language)
+                      </option>
                       <option value="custom">自定义目标语言</option>
                     </select>
                   </div>

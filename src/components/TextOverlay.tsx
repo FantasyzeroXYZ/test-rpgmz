@@ -36,6 +36,10 @@ interface TextOverlayProps {
   ttsVolume?: number;
   showHistory?: boolean;
   onHistoryClick?: () => void;
+  /** 翻译源语言代码（如 'ja', 'en', 'auto'），默认 'auto' */
+  translationSourceLang?: string;
+  /** 翻译目标语言代码（如 'zh-CN', 'en'），默认 'zh-CN' */
+  translationTargetLang?: string;
 }
 
 // Access the globalVocabList from VocabOverlay context indirectly
@@ -72,7 +76,9 @@ export const TextOverlay: React.FC<TextOverlayProps> = ({
   ttsPitch = 100,
   ttsVolume = 80,
   showHistory = true,
-  onHistoryClick
+  onHistoryClick,
+  translationSourceLang = 'auto',
+  translationTargetLang = 'zh-CN',
 }) => {
   const [selectedWord, setSelectedWord] = React.useState<string | null>(null);
   const [translationText, setTranslationText] = React.useState<string | null>(null);
@@ -123,8 +129,9 @@ export const TextOverlay: React.FC<TextOverlayProps> = ({
     if (!text?.trim()) return;
     setIsTranslating(true);
     try {
-      // 使用 MyMemory API 进行真实翻译（自动检测源语言 → 中文）
-      const result = await translateWithCache(text, 'auto', 'zh-CN');
+      // 使用 MyMemory API 进行真实翻译（根据用户设置的语言对）
+      console.log('[TextOverlay] 触发翻译 — sourceLang:', translationSourceLang, 'targetLang:', translationTargetLang, 'text:', text.slice(0, 50));
+      const result = await translateWithCache(text, translationSourceLang, translationTargetLang);
       setTranslationText(result.translatedText);
     } catch (e) {
       console.warn('[TextOverlay] 翻译失败:', e);
@@ -140,7 +147,7 @@ export const TextOverlay: React.FC<TextOverlayProps> = ({
     } else if (!isOpen) {
       setTranslationText(null);
     }
-  }, [text, autoTranslate, showTranslation, isOpen]);
+  }, [text, autoTranslate, showTranslation, isOpen, translationSourceLang, translationTargetLang]);
 
   // Dynamic Tokenization function based on setting
   const segmentedWords = React.useMemo(() => {

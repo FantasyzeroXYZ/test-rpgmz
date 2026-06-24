@@ -22,6 +22,7 @@ import { VirtualGamepad } from "./VirtualGamepad";
 import { ConfirmModal } from "./ConfirmModal";
 // 模拟器桥接服务 — 完整的游戏加载与启动
 import { loadAndBootGame, shutdownGame, captureGameText, getEmulatorState } from "../services/emulatorBridge";
+import { resolveTranslationLanguages } from "../services/translationService";
 
 // Module-level guard prevents React StrictMode double-mount from triggering
 // two VFS loads which would revoke blob URLs mid-script-load.
@@ -100,6 +101,28 @@ export const EmulatorView: React.FC<EmulatorViewProps> = ({
   const iframeRef = React.useRef<HTMLIFrameElement | null>(null);
   const textPollTimerRef = React.useRef<NodeJS.Timeout | null>(null);
   const gameContainerRef = React.useRef<HTMLDivElement | null>(null);
+
+  // 解析翻译语言：将 UI 设置中的模式选择（跟随界面/跟随学习语言/自定义等）
+  // 转换为 MyMemory API 可用的实际语言代码
+  const translationLangs = React.useMemo(() => {
+    return resolveTranslationLanguages({
+      sourceLangMode: uiState.translationSourceLangMode,
+      sourceLangCustom: uiState.translationSourceLangCustom,
+      targetLangMode: uiState.translationTargetLangMode,
+      targetLangCustom: uiState.translationTargetLangCustom,
+      uiLanguage: uiState.uiLanguage,
+      gameLanguage: game.language,
+      learningLanguage: uiState.learningLanguage,
+    });
+  }, [
+    uiState.translationSourceLangMode,
+    uiState.translationSourceLangCustom,
+    uiState.translationTargetLangMode,
+    uiState.translationTargetLangCustom,
+    uiState.uiLanguage,
+    uiState.learningLanguage,
+    game.language,
+  ]);
 
   // 消息监听器 — 独立于加载流程，不受 _emulatorLoading 影响
   // （StrictMode 双挂载时清理后需重新添加，否则 text-changed 永远收不到）
@@ -563,6 +586,8 @@ export const EmulatorView: React.FC<EmulatorViewProps> = ({
           ttsVolume={uiState.ttsVolume}
           showHistory={uiState.showHistory}
           onHistoryClick={() => alert("剧情对话历史记录管理系统已载入。此处可管理以往全部对话缓存数据。")}
+          translationSourceLang={translationLangs.sourceLang}
+          translationTargetLang={translationLangs.targetLang}
         />
       </div>
 
