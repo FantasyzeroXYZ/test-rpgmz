@@ -58,9 +58,32 @@ function getVfs(){
     try{if(window.parent&&window.parent!==window){var pv=window.parent.__vfsRef;if(pv&&pv._initialized){window.__vfsRef=pv;return pv;}}}catch(e){}
     return null;
 }
+// Game volume control (does NOT affect browser TTS)
+var _gameVolume=1.0;
+function _applyGameVolume(){
+    try{
+        if(typeof AudioManager!=='undefined'){
+            if(AudioManager.__vfsStoredMaster===undefined){
+                AudioManager.__vfsStoredMaster=AudioManager.masterVolume;
+            }
+            AudioManager.masterVolume=AudioManager.__vfsStoredMaster*_gameVolume;
+        }
+        // Also adjust any playing audio elements
+        var allAudio=document.querySelectorAll('audio');
+        for(var ai=0;ai<allAudio.length;ai++){
+            var a=allAudio[ai];
+            if(a.__vfsOrigVolume===undefined) a.__vfsOrigVolume=a.volume;
+            a.volume=Math.min(1,a.__vfsOrigVolume*_gameVolume);
+        }
+    }catch(e){}
+}
 window.addEventListener('message',function(e){
     if(e.data&&e.data.source==='host-vfs'){
         if(e.data.type==='refresh-saves'){if(typeof StorageManager!=='undefined'){try{StorageManager.updateForageKeys();}catch(_){}}}
+        if(e.data.type==='set-game-volume'){
+            _gameVolume=e.data.volume/100;
+            _applyGameVolume();
+        }
     }
 });
 function normalizePath(url){
@@ -638,5 +661,25 @@ console.log('[VFS Sandbox] Interception layer injected. VFS available:',!!getVfs
 		}, 2000);
 		setTimeout(function(){ clearInterval(_t); }, 60000);
 	})();
+
+	// ── Game volume hook (AudioManager.masterVolume) ──
+	// Periodically checks and reapplies host game volume on top of game's internal volume.
+	// This does NOT affect browser TTS (SpeechSynthesis), which runs outside the iframe.
+	var _volCheckInterval=setInterval(function(){
+		if(_gameVolume===1.0) return; // No adjustment needed
+		try{
+			if(typeof AudioManager!=='undefined'){
+				// Store the game's intended master volume (before our modifier)
+				if(AudioManager.__vfsStoredMaster===undefined){
+					AudioManager.__vfsStoredMaster=AudioManager.masterVolume;
+				}
+				// Re-apply: game's internal volume × host game volume
+				var targetVol=AudioManager.__vfsStoredMaster*_gameVolume;
+				if(Math.abs(AudioManager.masterVolume-targetVol)>0.001){
+					AudioManager.masterVolume=targetVol;
+				}
+			}
+		}catch(e){}
+	},1500);
 
 })();

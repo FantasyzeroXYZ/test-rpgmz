@@ -1,7 +1,6 @@
-test-rpgmz-main/
 claude-ds.ps1
-asar/
-
+legacy/
+test-rpgmz-main/
 
 node_modules/
 target/
@@ -11,8 +10,6 @@ dist/
 debug.log
 .claude/
 .history/
-legacy/
-test-rpgmz-main/
 # Keep pkg (WASM files needed for deployment)
 # Keep fonts (extracted game fonts)
 # Keep libs (offline CDN deps)

@@ -691,3 +691,19 @@ export function notifyIframeRefreshSaves(): void {
     console.warn('[emulatorBridge] 发送 refresh-saves 失败:', e.message);
   }
 }
+
+/**
+ * 向游戏 iframe 发送游戏音量设置（0-100），仅影响游戏内音频，不影响 TTS。
+ */
+export function notifyIframeGameVolume(volume: number): void {
+  const iframe = document.getElementById('game-iframe') as HTMLIFrameElement | null;
+  if (!iframe?.contentWindow) return;
+  try {
+    iframe.contentWindow.postMessage(
+      { source: 'host-vfs', type: 'set-game-volume', volume },
+      '*'
+    );
+  } catch (e: any) {
+    // 静默失败 — iframe 可能尚未就绪
+  }
+}

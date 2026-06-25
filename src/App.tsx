@@ -7,7 +7,7 @@ import { EmulatorView } from './components/EmulatorView';
 import { SidePanel, LeftPanel } from './components/SidePanel';
 import { EditEntryModal } from './components/EditEntryModal';
 import { NoteEditor } from './components/NoteEditor';
-import { DictionarySidebar, OFFLINE_DICTIONARY } from './components/DictionarySidebar';
+import { DictionarySidebar } from './components/DictionarySidebar';
 import { FloatingLookupCard } from './components/FloatingLookupCard';
 // 服务层导入 — 提供纯浏览器端的持久化存储与 API 查询能力
 import { getStoredGames, saveGames, getStoredVocab, saveVocab, getStoredSentences, getStoredNotes, saveNotes, getStoredSettings, saveSettings } from './services/storageService';
@@ -52,7 +52,7 @@ export default function App() {
     activeModal: 'NONE',
     sidePanelOpen: false,
     textOverlayOpen: false,
-    textOverlayOpacity: 85,
+    textOverlayOpacity: 85, // 0-100 百分比，文本框背景透明度
     textOverlayFontSize: 100,
     autoUpdateText: true,
     currentSideTab: 'SETTINGS',
@@ -158,16 +158,13 @@ export default function App() {
     dictionaryActiveTab: 'local',
     dictionarySearchQuery: '',
     dictionarySentence: '',
-    dictionaries: [
-      { id: '1', name: 'J-E Meaning Dictionary', type: 'MEANING', language: 'Japanese', enabled: true, order: 0 },
-      { id: '2', name: 'K-E Tag Dictionary', type: 'TAG', language: 'Korean', enabled: true, order: 1 },
-      { id: '3', name: 'E-C Advanced Dictionary', type: 'MEANING', language: 'English', enabled: true, order: 2 },
-    ],
+    dictionaries: [], // Populated from Yomitan dictionary imports
     dictionaryFilterLanguage: 'all',
     dictionaryFilterType: 'all',
     segmentationMode: 'browser',
     lookupMode: 'click',
     clickLookupSource: 'all',
+    dictionaryLanguageMode: 'game',
     lemmatizationEnabled: true,
     lemmatizationLanguages: ['Japanese', 'English', 'French', 'German', 'Spanish'],
     lemmatizationExternalRules: [],

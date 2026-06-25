@@ -163,10 +163,10 @@ export const HomeView: React.FC<HomeViewProps> = ({
         engineType,
       }, zipData);
 
-      // 刷新游戏列表
+      // 刷新游戏列表并自动弹出编辑条目弹窗
       const allEntries = await libraryGetAll();
       const games = allEntries.map(libraryEntryToGameEntry);
-      setUIState({ games });
+      setUIState({ games, activeModal: 'EDIT_ENTRY', editingGameId: newId });
 
       // 清理 VFS
       vfs.shutdown();

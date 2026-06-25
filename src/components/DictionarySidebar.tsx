@@ -6,6 +6,7 @@ import { MOCK_VOCAB } from '../mockData';
 // 服务层导入 — 提供真实的词典查询、翻译与持久化能力
 import { lookupWord, formatDictionaryResult, lookupAndTranslate } from '../services/dictionaryService';
 import { translateText } from '../services/translationService';
+import { importYomitanDictionary, listYomitanDictionaries, removeYomitanDictionary } from '../services/yomitanDictService';
 import { getStoredVocab, saveVocab, addVocabWord, deleteVocabWord, getStoredSentences, saveSentences, addSentence, deleteSentence, downloadCSV, exportVocabToCSV, exportSentencesToCSV } from '../services/storageService';
 
 interface DictionarySidebarProps {
@@ -15,23 +16,18 @@ interface DictionarySidebarProps {
   setUIState: (state: Partial<UIState>) => void;
 }
 
-// Built-in high-quality translation dictionary map for common gameplay/scenario words
-export const OFFLINE_DICTIONARY: Record<string, string> = {
-  "session": "【名词】 会话; 会议; 一场活动。\n在模拟器中特指当前挂载并已激活的游戏内核运行实例。",
-  "active": "【形容词】 活跃的; 运行中的; 起作用的。\n在系统监控日志中，表示模拟内核、图形管线及音频输出均正常运作。",
-  "resource": "【名词】 资源; 财力; 资产。\n指CPU线程、GPU着色器、内存显存缓存等硬件分配给游戏的底层物理耗能。",
-  "graphics": "【名词】 图形学; 图表; 图像数据。\n指游戏内的图形像素输出模块，管理高清滤镜渲染及二值化显示。",
-  "pipeline": "【名词】 管道; 着色器管线; 流水线。\n控制着游戏画面从ROM芯片图像源传输到渲染器，最终投射在屏幕的过程。",
-  "system": "【名词】 系统; 操作系统; 体系规划。\n特指搭载了翻译、存档、手柄以及智能OCR插件的通用AI Studio仿真大厅运行栈。",
-  "game": "【名词】 游戏; 娱乐场景; 交互式多媒体。\n指代当前启动或配置好的任何可视化文字冒险或模拟游戏 ROM 游戏卡带。"
-};
+// Local dictionary quick-reference map (populated from Yomitan imports via dictionaryService)
+export const OFFLINE_DICTIONARY: Record<string, string> = {};
 
 const DictionaryManager = ({ uiState, setUIState }: { uiState: UIState, setUIState: (s: Partial<UIState>) => void }) => {
   const isLight = uiState.theme === 'light';
   const [isImporting, setIsImporting] = React.useState(false);
   const [newDictName, setNewDictName] = React.useState('');
-  const [newDictType, setNewDictType] = React.useState<'TAG' | 'MEANING'>('MEANING');
+  const [newDictType, setNewDictType] = React.useState<'MEANING' | 'TAG'>('MEANING');
   const [newDictLang, setNewDictLang] = React.useState('Japanese');
+  const [importFile, setImportFile] = React.useState<File | null>(null);
+  const [importProgress, setImportProgress] = React.useState({ pct: 0, msg: '' });
+  const [importPending, setImportPending] = React.useState(false);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   const languages = ['all', ...new Set(uiState.dictionaries.map(d => d.language))];
@@ -39,25 +35,42 @@ const DictionaryManager = ({ uiState, setUIState }: { uiState: UIState, setUISta
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      // Use filename (without extension) as the dictionary name
-      const name = file.name.replace(/\.[^/.]+$/, "");
+      const name = file.name.replace(/\.[^/.]+$/, '');
       setNewDictName(name);
+      setImportFile(file);
     }
   };
 
-  const handleImport = () => {
-    if (!newDictName) return;
-    const newEntry: DictionaryEntry = {
-      id: Math.random().toString(36).substr(2, 9),
-      name: newDictName,
-      type: newDictType,
-      language: newDictLang,
-      enabled: true,
-      order: uiState.dictionaries.length
-    };
-    setUIState({ dictionaries: [...uiState.dictionaries, newEntry] });
-    setIsImporting(false);
-    setNewDictName('');
+  const handleImport = async () => {
+    if (!importFile || !newDictName) return;
+    setImportPending(true);
+    setImportProgress({ pct: 0, msg: '开始导入...' });
+    try {
+      const meta = await importYomitanDictionary(importFile, newDictLang, newDictType, (pct, msg) => {
+        setImportProgress({ pct, msg });
+      });
+      // Add to dictionary list
+      const newEntry: DictionaryEntry = {
+        id: meta.id,
+        name: meta.name,
+        type: meta.type,
+        language: meta.language,
+        enabled: true,
+        order: uiState.dictionaries.length,
+      };
+      setUIState({ dictionaries: [...uiState.dictionaries, newEntry] });
+      setImportProgress({ pct: 100, msg: `导入完成！共 ${meta.termCount} 条词条` });
+      setTimeout(() => {
+        setIsImporting(false);
+        setImportPending(false);
+        setNewDictName('');
+        setImportFile(null);
+        setImportProgress({ pct: 0, msg: '' });
+      }, 1500);
+    } catch (err: any) {
+      setImportProgress({ pct: 0, msg: `导入失败: ${err.message}` });
+      setImportPending(false);
+    }
   };
 
   const moveDict = (id: string, direction: 'up' | 'down') => {
@@ -113,32 +126,49 @@ const DictionaryManager = ({ uiState, setUIState }: { uiState: UIState, setUISta
               />
               
               <div className="space-y-1">
-                <span className="text-[10px] font-bold opacity-50 pl-1">选择词典文件</span>
-                <button 
+                <span className="text-[10px] font-bold opacity-50 pl-1">选择 Yomitan 词典 (.zip)</span>
+                <button
                   onClick={() => fileInputRef.current?.click()}
+                  disabled={importPending}
                   className={`w-full py-4 px-3 rounded-xl border-2 border-dashed transition-all flex flex-col items-center justify-center gap-2 ${
-                    isLight 
-                       ? 'bg-white border-slate-200 text-slate-400 hover:border-cyan-500 hover:text-cyan-600 hover:bg-cyan-50/30' 
+                    isLight
+                       ? 'bg-white border-slate-200 text-slate-400 hover:border-cyan-500 hover:text-cyan-600 hover:bg-cyan-50/30'
                        : 'bg-black/20 border-white/10 text-slate-500 hover:border-cyan-500/50 hover:text-cyan-400 hover:bg-cyan-500/5'
                   }`}
                 >
                   <Upload size={20} className={newDictName ? 'text-cyan-500' : 'opacity-40'} />
                   <span className={`text-xs font-bold ${newDictName ? (isLight ? 'text-slate-800' : 'text-white') : ''}`}>
-                    {newDictName ? `已选择: ${newDictName}` : '点击或拖拽上传词典文件'}
+                    {newDictName ? `已选择: ${newDictName}` : '点击上传 Yomitan 词典 .zip 文件'}
                   </span>
-                  {!newDictName && <span className="text-[9px] opacity-50">支持 .zip, .yomichan, .json 格式</span>}
+                  {!newDictName && <span className="text-[9px] opacity-50">term_bank + index.json 格式</span>}
                 </button>
               </div>
 
+              {importProgress.msg && (
+                <div className={`rounded-xl p-3 ${isLight ? 'bg-white' : 'bg-black/20'}`}>
+                  <div className="flex items-center gap-2 mb-1.5">
+                    {importPending && importProgress.pct < 100 && (
+                      <span className="inline-block w-3 h-3 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin" />
+                    )}
+                    <span className="text-[10px] font-bold text-cyan-500">{importProgress.msg}</span>
+                  </div>
+                  {importProgress.pct > 0 && (
+                    <div className="w-full h-1 rounded-full bg-white/10 overflow-hidden">
+                      <div className="h-full bg-cyan-500 rounded-full transition-all" style={{ width: `${importProgress.pct}%` }} />
+                    </div>
+                  )}
+                </div>
+              )}
+
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
-                  <span className="text-[10px] font-bold opacity-50 pl-1">类型</span>
-                  <select 
-                    value={newDictType} 
-                    onChange={(e) => setNewDictType(e.target.value as any)}
+                  <span className="text-[10px] font-bold opacity-50 pl-1">词典类型</span>
+                  <select
+                    value={newDictType}
+                    onChange={(e) => setNewDictType(e.target.value as 'MEANING' | 'TAG')}
                     className={`w-full py-2 px-3 rounded-xl text-xs outline-none border transition-all ${
-                      isLight 
-                         ? 'bg-white border-slate-200 text-slate-800' 
+                      isLight
+                         ? 'bg-white border-slate-200 text-slate-800'
                          : 'bg-white/5 border-white/10 text-white bg-[#121820]'
                     }`}
                   >
@@ -147,13 +177,13 @@ const DictionaryManager = ({ uiState, setUIState }: { uiState: UIState, setUISta
                   </select>
                 </div>
                 <div className="space-y-1">
-                  <span className="text-[10px] font-bold opacity-50 pl-1">语言</span>
-                  <select 
-                    value={newDictLang} 
+                  <span className="text-[10px] font-bold opacity-50 pl-1">词典语言</span>
+                  <select
+                    value={newDictLang}
                     onChange={(e) => setNewDictLang(e.target.value)}
                     className={`w-full py-2 px-3 rounded-xl text-xs outline-none border transition-all ${
-                      isLight 
-                         ? 'bg-white border-slate-200 text-slate-800' 
+                      isLight
+                         ? 'bg-white border-slate-200 text-slate-800'
                          : 'bg-white/5 border-white/10 text-white bg-[#121820]'
                     }`}
                   >
@@ -164,14 +194,14 @@ const DictionaryManager = ({ uiState, setUIState }: { uiState: UIState, setUISta
                   </select>
                 </div>
               </div>
-              <button 
+              <button
                 onClick={handleImport}
-                disabled={!newDictName}
+                disabled={!newDictName || importPending}
                 className={`w-full py-2.5 rounded-xl text-xs font-bold transition-all active:scale-95 disabled:opacity-50 disabled:active:scale-100 ${
-                  isLight ? 'bg-slate-900 text-white hover:bg-slate-800' : 'bg-cyan-500 text-black hover:bg-cyan-400 font-black'
+                  importPending ? 'bg-slate-600 text-white' : isLight ? 'bg-slate-900 text-white hover:bg-slate-800' : 'bg-cyan-500 text-black hover:bg-cyan-400 font-black'
                 }`}
               >
-                开始解析并导入
+                {importPending ? '导入中...' : '开始解析并导入'}
               </button>
             </div>
           </motion.div>
@@ -262,8 +292,11 @@ const DictionaryManager = ({ uiState, setUIState }: { uiState: UIState, setUISta
                     <ChevronDown size={14} />
                  </button>
                  <div className={`w-px h-3 mx-1 ${isLight ? 'bg-slate-200' : 'bg-white/10'}`} />
-                 <button 
-                   onClick={() => setUIState({ dictionaries: uiState.dictionaries.filter(d => d.id !== dict.id) })}
+                 <button
+                   onClick={() => {
+                     setUIState({ dictionaries: uiState.dictionaries.filter(d => d.id !== dict.id) });
+                     removeYomitanDictionary(dict.id).catch(() => {});
+                   }}
                    className="p-1 rounded-md hover:text-red-500 transition-colors"
                  >
                    <Trash2 size={12} />
@@ -1606,6 +1639,42 @@ export const DictionarySidebar: React.FC<DictionarySidebarProps> = ({ isOpen, on
                                   }`}
                                 >
                                   {sourceItem.label}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {uiState.lookupMode === 'click' && (
+                          <div className={`p-3 rounded-xl border flex items-center justify-between transition-all animate-in fade-in slide-in-from-top-2 duration-300 ${
+                            isLight ? 'bg-white border-slate-100 shadow-sm' : 'bg-white/5 border-white/5'
+                          }`}>
+                            <div className="flex items-center gap-2">
+                               <div className={`p-1.5 rounded-lg ${isLight ? 'bg-amber-50' : 'bg-amber-500/10'}`}>
+                                 <Globe size={12} className="text-amber-400" />
+                               </div>
+                               <div className="flex flex-col">
+                                 <span className="text-[10px] font-black uppercase tracking-wider">词典查询语言</span>
+                                 <span className="text-[8px] opacity-40 font-bold">选择词典查询时优先匹配的语言</span>
+                               </div>
+                            </div>
+                            <div className={`flex p-0.5 rounded-lg gap-0.5 select-none ${isLight ? 'bg-slate-100' : 'bg-white/5'}`}>
+                              {([
+                                { key: 'game', label: '跟随游戏' },
+                                { key: 'learning', label: '跟随学习语言' }
+                              ] as const).map((modeItem) => (
+                                <button
+                                  key={modeItem.key}
+                                  onClick={() => setUIState({ dictionaryLanguageMode: modeItem.key })}
+                                  className={`flex-1 py-1 px-2 rounded-md text-[9px] font-bold transition-all cursor-pointer text-center ${
+                                    uiState.dictionaryLanguageMode === modeItem.key
+                                      ? (isLight ? 'bg-white text-amber-500 shadow-xs' : 'bg-amber-500 text-black shadow-lg shadow-amber-500/10')
+                                      : isLight
+                                        ? 'text-slate-500 hover:text-slate-850'
+                                        : 'text-slate-400 hover:text-white'
+                                  }`}
+                                >
+                                  {modeItem.label}
                                 </button>
                               ))}
                             </div>

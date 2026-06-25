@@ -542,7 +542,7 @@ const EnhancedSettings = ({
                   <span
                     className={`text-[11px] font-bold ${isLight ? "text-slate-505" : "text-slate-450"}`}
                   >
-                    系统音量
+                    游戏音量
                   </span>
                   <span className="text-[10px] font-mono text-cyan-505 font-bold">
                     {uiState.gameVolume}%
@@ -809,17 +809,17 @@ const EnhancedSettings = ({
                         浮层底色透明度
                       </span>
                       <span className="text-cyan-500 font-mono font-bold">
-                        {Math.round(uiState.textOverlayOpacity * 100)}%
+                        {uiState.textOverlayOpacity}%
                       </span>
                     </div>
                     <input
                       type="range"
                       min="0"
                       max="100"
-                      value={uiState.textOverlayOpacity * 100}
+                      value={uiState.textOverlayOpacity}
                       onChange={(e) =>
                         setUIState({
-                          textOverlayOpacity: parseFloat(e.target.value) / 100,
+                          textOverlayOpacity: parseInt(e.target.value),
                         })
                       }
                       className="w-full h-1 bg-slate-200 dark:bg-white/10 rounded-lg appearance-none cursor-pointer accent-cyan-500"
@@ -836,13 +836,14 @@ const EnhancedSettings = ({
                         浮层文本字号
                       </span>
                       <span className="text-cyan-500 font-mono font-bold">
-                        {uiState.textOverlayFontSize}px
+                        {uiState.textOverlayFontSize}%
                       </span>
                     </div>
                     <input
                       type="range"
-                      min="10"
-                      max="30"
+                      min="50"
+                      max="200"
+                      step="5"
                       value={uiState.textOverlayFontSize}
                       onChange={(e) =>
                         setUIState({

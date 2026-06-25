@@ -4,6 +4,12 @@ import { Copy, RefreshCw, Zap, ZapOff, Languages, X, BookOpen, Clipboard, Pointe
 import { VocabWord } from '../types';
 // 翻译服务 — 使用 MyMemory API 进行真实翻译
 import { translateText, translateWithCache } from '../services/translationService';
+// 词典服务 — 本地词典 + Free Dictionary API
+import { lookupWord, DictionaryResult } from '../services/dictionaryService';
+// Yomitan 词典 — 前缀匹配 + 多结果
+import { queryYomitanTerms } from '../services/yomitanDictService';
+// 分词服务 — 统一的文本分词与词形还原
+import { tokenizeText, tokenizeTextSync } from '../services/tokenizerService';
 
 interface TextOverlayProps {
   isOpen: boolean;
@@ -50,7 +56,7 @@ export const TextOverlay: React.FC<TextOverlayProps> = ({
   isOpen, 
   onToggle,
   text, 
-  opacity = 80, 
+  opacity = 85, // 0-100 百分比，文本框背景透明度
   fontSize = 100,
   autoUpdate = true,
   onToggleAuto,
@@ -84,7 +90,66 @@ export const TextOverlay: React.FC<TextOverlayProps> = ({
   const [translationText, setTranslationText] = React.useState<string | null>(null);
   const [isTranslating, setIsTranslating] = React.useState(false);
   const [isTranslationExpanded, setIsTranslationExpanded] = React.useState(true);
+  // Popover tab state: 本地词典 | API词典 | 翻译
+  const [activePopoverTab, setActivePopoverTab] = React.useState<'local' | 'api' | 'translate'>('local');
+  const [popoverLocalResults, setPopoverLocalResults] = React.useState<DictionaryResult[]>([]);
+  const [popoverApiResult, setPopoverApiResult] = React.useState<DictionaryResult | null>(null);
+  const [popoverTranslationResult, setPopoverTranslationResult] = React.useState<string | null>(null);
+  const [popoverLoading, setPopoverLoading] = React.useState({ local: false, api: false, translate: false });
+  // Track which local entries are expanded (index -> boolean, all expanded by default)
+  const [expandedEntries, setExpandedEntries] = React.useState<Record<number, boolean>>({});
+  const [localMatchMode] = React.useState<'prefix' | 'exact'>('prefix');
   const isLight = theme === 'light';
+
+  // Load popover data based on active tab (only active tab executes)
+  React.useEffect(() => {
+    if (!selectedWord) return;
+    const word = selectedWord;
+    let cancelled = false;
+
+    if (activePopoverTab === 'local') {
+      setPopoverLoading(p => ({ ...p, local: true }));
+      queryYomitanTerms(word, localMatchMode).then(results => {
+        if (!cancelled) {
+          setPopoverLocalResults(results);
+          // Auto-expand first 3 entries
+          const expanded: Record<number, boolean> = {};
+          for (let i = 0; i < Math.min(results.length, 3); i++) expanded[i] = true;
+          setExpandedEntries(expanded);
+          setPopoverLoading(p => ({ ...p, local: false }));
+        }
+      }).catch(() => {
+        if (!cancelled) setPopoverLoading(p => ({ ...p, local: false }));
+      });
+    } else if (activePopoverTab === 'api') {
+      if (popoverApiResult?.word === word) return;
+      setPopoverLoading(p => ({ ...p, api: true }));
+      lookupWord(word, 'api').then(result => {
+        if (!cancelled) { setPopoverApiResult(result); setPopoverLoading(p => ({ ...p, api: false })); }
+      }).catch(() => {
+        if (!cancelled) setPopoverLoading(p => ({ ...p, api: false }));
+      });
+    } else if (activePopoverTab === 'translate') {
+      setPopoverLoading(p => ({ ...p, translate: true }));
+      translateWithCache(word, translationSourceLang, translationTargetLang).then(result => {
+        if (!cancelled) { setPopoverTranslationResult(result.translatedText); setPopoverLoading(p => ({ ...p, translate: false })); }
+      }).catch(() => {
+        if (!cancelled) setPopoverLoading(p => ({ ...p, translate: false }));
+      });
+    }
+
+    return () => { cancelled = true; };
+  }, [selectedWord, activePopoverTab]);
+
+  // Reset popover data when word changes, but keep the user's selected tab
+  React.useEffect(() => {
+    if (selectedWord) {
+      setPopoverLocalResults([]);
+      setPopoverApiResult(null);
+      setPopoverTranslationResult(null);
+      setExpandedEntries({});
+    }
+  }, [selectedWord]);
 
   // TTS Speech Function
   const speakText = React.useCallback((textToSpeak: string) => {
@@ -151,26 +216,51 @@ export const TextOverlay: React.FC<TextOverlayProps> = ({
     }
   }, [text, autoTranslate, showTranslation, isOpen, translationSourceLang, translationTargetLang]);
 
-  // Dynamic Tokenization function based on setting
-  const segmentedWords = React.useMemo(() => {
-    if (!text) return [];
-    if (tokenizerMethod === 'none') return [text];
-    if (tokenizerMethod === 'space') return text.split(/\s+/);
-    if (tokenizerMethod === 'char') return text.split('');
-    if (tokenizerMethod === 'browser') {
-      try {
-        // Intl.Segmenter native support
-        // @ts-ignore
-        const segmenter = new Intl.Segmenter(undefined, { granularity: 'word' });
-        const segments = [...segmenter.segment(text)];
-        return segments.map(s => s.segment);
-      } catch (e) {
-        // fallback
-        return text.split(/(\b|\s+)/).filter(Boolean);
-      }
+  // Tokenization using the centralized tokenizer service.
+  // Async for 'japanese' (kuromoji.js), sync for other methods.
+  // Supports lemmatization via lemmatizationEnabled prop.
+  const [segmentedWords, setSegmentedWords] = React.useState<string[]>([]);
+  const [tokenizerLoading, setTokenizerLoading] = React.useState(false);
+
+  React.useEffect(() => {
+    if (!text) {
+      setSegmentedWords([]);
+      return;
     }
-    return text.split(' ');
-  }, [text, tokenizerMethod]);
+
+    let cancelled = false;
+
+    const doTokenize = async () => {
+      if (tokenizerMethod === 'japanese') {
+        setTokenizerLoading(true);
+        try {
+          const tokens = await tokenizeText(text, 'japanese', lemmatizationEnabled);
+          if (cancelled) return;
+          setSegmentedWords(tokens.map(t => t.lemma || t.text));
+        } catch (e) {
+          if (!cancelled) {
+            // Fallback to browser tokenizer if kuromoji fails to load
+            console.warn('[TextOverlay] 日语分词加载失败，回退至浏览器分词:', e);
+            const tokens = tokenizeTextSync(text, 'browser', lemmatizationEnabled);
+            setSegmentedWords(tokens.map(t => t.lemma || t.text));
+          }
+        } finally {
+          if (!cancelled) setTokenizerLoading(false);
+        }
+      } else {
+        // Synchronous methods: none, space, char, browser
+        const tokens = tokenizeTextSync(
+          text,
+          tokenizerMethod as 'none' | 'browser' | 'space' | 'char',
+          lemmatizationEnabled
+        );
+        setSegmentedWords(tokens.map(t => t.lemma || t.text));
+      }
+    };
+
+    doTokenize();
+    return () => { cancelled = true; };
+  }, [text, tokenizerMethod, lemmatizationEnabled]);
 
   const handleQuickAddVocab = (word: string) => {
     try {
@@ -201,10 +291,14 @@ export const TextOverlay: React.FC<TextOverlayProps> = ({
     }
   };
 
-  const normalizedOpacity = opacity <= 1 ? opacity : opacity / 100;
-  const bgColor = isLight ? `rgba(255, 255, 255, ${normalizedOpacity})` : `rgba(5, 7, 10, ${normalizedOpacity})`;
-  const borderColor = isLight ? 'border-slate-200' : 'border-white/10';
-  const shadowColor = isLight ? 'shadow-slate-200/50' : 'shadow-2xl';
+  // opacity is stored as 0-100 percentage; normalize to 0-1 for CSS rgba()
+  const normalizedOpacity = opacity / 100;
+  // 纯通透透明度：0=完全透明，100=完全不透明
+  const bgColor = isLight
+    ? `rgba(255, 255, 255, ${normalizedOpacity})`
+    : `rgba(0, 0, 0, ${normalizedOpacity})`;
+  const borderColor = isLight ? 'border-slate-200/60' : 'border-white/10';
+  const shadowColor = isLight ? 'shadow-slate-200/30' : 'shadow-2xl';
 
   return (
     <AnimatePresence>
@@ -214,7 +308,7 @@ export const TextOverlay: React.FC<TextOverlayProps> = ({
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: 100 }}
           style={{ backgroundColor: bgColor }}
-          className={`w-[92%] max-w-4xl backdrop-blur-2xl border border-b-0 overflow-hidden pointer-events-auto relative group flex shadow-2xl ${borderColor} ${shadowColor}`}
+          className={`w-[92%] max-w-4xl border border-b-0 overflow-hidden pointer-events-auto relative group flex shadow-2xl ${borderColor} ${shadowColor}`}
         >
           {/* Main Content Side (Left) */}
           <div className="flex-1 flex flex-col relative px-3 sm:px-6 md:px-10 pt-3 pb-2 justify-end">
@@ -266,6 +360,15 @@ export const TextOverlay: React.FC<TextOverlayProps> = ({
 
             {/* Content Area (Top) */}
             <div className={`${isLight ? 'text-slate-800' : 'text-white'} leading-tight`} style={{ fontSize: `${fontSize}%` }}>
+              {/* Tokenizer loading indicator (kuromoji.js dictionary download) */}
+              {tokenizerLoading && (
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="inline-block w-3 h-3 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin" />
+                  <span className="text-[10px] text-cyan-500 font-bold uppercase tracking-wider">
+                    日语分词词典加载中...
+                  </span>
+                </div>
+              )}
               {textSelectableMode === 'selectable' ? (
                 // Copyable text form for Yomitan scanning
                 <div className="select-text text-left font-bold text-xs sm:text-sm tracking-wide leading-relaxed">
@@ -280,55 +383,171 @@ export const TextOverlay: React.FC<TextOverlayProps> = ({
                     }
                     return (
                       <div key={i} className="relative">
-                        <span 
+                        <span
                           onClick={() => {
-                            if (onWordClick) {
-                              onWordClick(word);
-                            } else {
-                              setSelectedWord(selectedWord === word ? null : word);
-                            }
-                          }} 
+                            if (onWordClick) onWordClick(word);
+                            setSelectedWord(selectedWord === word ? null : word);
+                          }}
                           className={`font-semibold tracking-wide transition-all cursor-pointer border-b-2 border-transparent px-[2px] py-0.5 rounded text-xs sm:text-sm ${
-                            selectedWord === word && !onWordClick
-                              ? 'text-cyan-400 bg-cyan-500/20 border-cyan-500 shadow-md shadow-cyan-500/10' 
-                              : isLight 
-                                ? 'text-slate-800 hover:text-cyan-600 hover:bg-slate-100 hover:border-cyan-500/40' 
+                            selectedWord === word
+                              ? 'text-cyan-400 bg-cyan-500/20 border-cyan-500 shadow-md shadow-cyan-500/10'
+                              : isLight
+                                ? 'text-slate-800 hover:text-cyan-600 hover:bg-slate-100 hover:border-cyan-500/40'
                                 : 'text-white/95 hover:text-cyan-400 hover:bg-cyan-500/10 hover:border-cyan-500'
                           }`}
                           style={{ fontSize: '1em' }}
                         >
                           {word}
                         </span>
-                        
-                        {/* Definition Popover (Minimal) - Only show if onWordClick is not provided */}
-                        <AnimatePresence>
-                          {selectedWord === word && !onWordClick && (
-                            <motion.div
-                              key={`popover-${i}`}
-                              initial={{ opacity: 0, y: 10 }}
-                              animate={{ opacity: 1, y: 0 }}
-                              exit={{ opacity: 0, y: 10 }}
-                              className={`absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-48 border rounded-xl p-3 shadow-2xl z-50 pointer-events-auto ${
+
+                        {/* Definition Popover — Tabbed: 本地词典 | API词典 | 翻译 — instant appearance */}
+                        {selectedWord === word && (
+                            <div
+                              className={`absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-56 border rounded-xl shadow-2xl z-50 pointer-events-auto ${
                                 isLight ? 'bg-white border-slate-200 text-slate-800' : 'bg-[#0a0d12] border-white/10 text-white'
                               }`}
                             >
-                              <div className="flex justify-between items-start mb-2">
-                                <h4 className="text-[10px] font-black text-cyan-500 uppercase tracking-widest leading-none truncate max-w-[120px]">{word}</h4>
-                                <span className="text-[8px] font-bold text-slate-500 bg-cyan-500/10 px-1 rounded">Dic</span>
+                              {/* Word title + play button */}
+                              <div className="flex items-center justify-between px-3 pt-3 pb-1">
+                                <h4 className="text-[11px] font-black text-cyan-500 uppercase tracking-widest leading-none truncate max-w-[140px]">{word}</h4>
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); speakText(word); }}
+                                  className={`p-1 rounded-lg transition-all cursor-pointer flex items-center justify-center ${
+                                    isLight
+                                      ? 'text-slate-400 hover:text-cyan-600 hover:bg-slate-100'
+                                      : 'text-slate-400 hover:text-cyan-400 hover:bg-white/10'
+                                  }`}
+                                  title="播放发音"
+                                >
+                                  <Play size={11} />
+                                </button>
                               </div>
-                              <p className={`text-[10px] leading-relaxed mb-2 ${isLight ? 'text-slate-600' : 'text-slate-300'}`}>
-                                这是针对生词 "{word}" 的智能AI/词典极速释义。您可一键将其记录至底层核心生词本中。
-                              </p>
-                              <button 
-                                onClick={() => handleQuickAddVocab(word)}
-                                className="w-full py-1.5 bg-cyan-500 hover:bg-cyan-400 shadow-lg shadow-cyan-500/15 rounded-lg text-[8px] font-black uppercase text-black transition-colors cursor-pointer"
-                              >
-                                添加到生词本
-                              </button>
-                              <div className={`absolute top-full left-1/2 -translate-x-1/2 border-8 border-transparent ${isLight ? 'border-t-white animate-pulse' : 'border-t-[#0a0d12]'}`} />
-                            </motion.div>
+
+                              {/* Tabs: 本地词典 | API词典 | 翻译 */}
+                              <div className={`flex border-b text-[9px] font-bold uppercase tracking-wider ${
+                                isLight ? 'border-slate-200' : 'border-white/10'
+                              }`}>
+                                {(['local', 'api', 'translate'] as const).map(tab => (
+                                  <button
+                                    key={tab}
+                                    onClick={() => setActivePopoverTab(tab)}
+                                    className={`flex-1 py-1.5 text-center transition-colors cursor-pointer ${
+                                      activePopoverTab === tab
+                                        ? isLight
+                                          ? 'text-cyan-600 border-b-2 border-cyan-500 bg-slate-50'
+                                          : 'text-cyan-400 border-b-2 border-cyan-500 bg-white/5'
+                                        : isLight
+                                          ? 'text-slate-400 hover:text-slate-600'
+                                          : 'text-slate-500 hover:text-slate-300'
+                                    }`}
+                                  >
+                                    {tab === 'local' ? '本地词典' : tab === 'api' ? 'API词典' : '翻译'}
+                                  </button>
+                                ))}
+                              </div>
+
+                              {/* Tab content — scrollable when content is long */}
+                              <div className="max-h-44 overflow-y-auto overscroll-contain px-3 py-2">
+                                {/* Loading spinner */}
+                                {popoverLoading[activePopoverTab] && (
+                                  <div className="flex items-center justify-center gap-2 py-3">
+                                    <span className="inline-block w-3 h-3 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin" />
+                                    <span className="text-[9px] text-cyan-500 font-bold">加载中...</span>
+                                  </div>
+                                )}
+
+                                {/* Local Dictionary tab — collapsible multi-entry */}
+                                {activePopoverTab === 'local' && !popoverLoading.local && (
+                                  popoverLocalResults.length === 0 ? (
+                                    <p className="text-[10px] text-slate-500 italic py-2">本地词典暂无收录</p>
+                                  ) : (
+                                    <div className="space-y-1">
+                                      {popoverLocalResults.map((entry, ei) => {
+                                        const isExpanded = expandedEntries[ei] !== false;
+                                        return (
+                                          <div key={ei} className={`rounded-lg ${isLight ? 'bg-slate-50/50' : 'bg-white/[0.03]'}`}>
+                                            {/* Entry header — click to expand/collapse */}
+                                            <button
+                                              onClick={() => setExpandedEntries(p => ({ ...p, [ei]: !isExpanded }))}
+                                              className={`w-full flex items-center gap-1.5 px-2 py-1.5 text-left transition-colors cursor-pointer rounded-lg ${
+                                                isLight ? 'hover:bg-slate-100' : 'hover:bg-white/5'
+                                              }`}
+                                            >
+                                              <span className={`text-[8px] transition-transform ${isExpanded ? 'rotate-90' : ''}`}>▶</span>
+                                              <span className={`text-[10px] font-bold truncate ${isLight ? 'text-slate-800' : 'text-white/90'}`}>
+                                                {entry.word}
+                                              </span>
+                                              {entry.phonetic && (
+                                                <span className="text-[9px] font-mono text-slate-500 truncate">[{entry.phonetic}]</span>
+                                              )}
+                                              <span className={`text-[8px] font-mono ml-auto ${isLight ? 'text-slate-400' : 'text-slate-500'}`}>
+                                                {entry.definitions.length}义
+                                              </span>
+                                            </button>
+                                            {/* Collapsible definitions */}
+                                            {isExpanded && (
+                                              <div className="px-2 pb-1.5 space-y-0.5">
+                                                {entry.definitions.map((d, di) => (
+                                                  <div key={di} className="text-[10px] leading-relaxed whitespace-pre-wrap pl-4 border-l-2 border-cyan-500/20">
+                                                    <span className={isLight ? 'text-slate-700' : 'text-slate-200'}>{d.definition}</span>
+                                                  </div>
+                                                ))}
+                                              </div>
+                                            )}
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  )
+                                )}
+
+                                {/* API Dictionary tab */}
+                                {activePopoverTab === 'api' && !popoverLoading.api && (
+                                  popoverApiResult ? (
+                                    popoverApiResult.error ? (
+                                      <p className="text-[10px] text-slate-500 italic py-2">{popoverApiResult.error}</p>
+                                    ) : (
+                                      <div className="space-y-1.5">
+                                        {popoverApiResult.phonetic && (
+                                          <p className="text-[9px] font-mono text-slate-500">{popoverApiResult.phonetic}</p>
+                                        )}
+                                        {popoverApiResult.definitions.map((d, di) => (
+                                          <div key={di} className="text-[10px] leading-relaxed whitespace-pre-wrap">
+                                            {d.partOfSpeech && d.partOfSpeech !== 'unknown' && (
+                                              <span className={`font-bold ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>{d.partOfSpeech} </span>
+                                            )}
+                                            <span className={isLight ? 'text-slate-700' : 'text-slate-200'}>{d.definition}</span>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    )
+                                  ) : null
+                                )}
+
+                                {/* Translation tab */}
+                                {activePopoverTab === 'translate' && !popoverLoading.translate && (
+                                  popoverTranslationResult ? (
+                                    <p className={`text-[10px] leading-relaxed ${isLight ? 'text-slate-700' : 'text-slate-200'}`}>
+                                      {popoverTranslationResult}
+                                    </p>
+                                  ) : null
+                                )}
+                              </div>
+
+                              {/* Add to vocab button */}
+                              <div className={`px-3 pb-3 pt-1 border-t ${isLight ? 'border-slate-100' : 'border-white/5'}`}>
+                                <button
+                                  onClick={() => handleQuickAddVocab(word)}
+                                  className="w-full py-1.5 bg-cyan-500 hover:bg-cyan-400 shadow-lg shadow-cyan-500/15 rounded-lg text-[8px] font-black uppercase text-black transition-colors cursor-pointer"
+                                >
+                                  添加到生词本
+                                </button>
+                              </div>
+
+                              {/* Arrow */}
+                              <div className={`absolute top-full left-1/2 -translate-x-1/2 border-8 border-transparent ${isLight ? 'border-t-white' : 'border-t-[#0a0d12]'}`} />
+                            </div>
                           )}
-                        </AnimatePresence>
                       </div>
                     );
                   })}

@@ -18,10 +18,11 @@ import {
   BookOpen,
 } from "lucide-react";
 import { TextOverlay } from "./TextOverlay";
+import { HistoryPanel } from "./HistoryPanel";
 import { VirtualGamepad } from "./VirtualGamepad";
 import { ConfirmModal } from "./ConfirmModal";
 // 模拟器桥接服务 — 完整的游戏加载与启动
-import { loadAndBootGame, shutdownGame, captureGameText, getEmulatorState } from "../services/emulatorBridge";
+import { loadAndBootGame, shutdownGame, captureGameText, getEmulatorState, notifyIframeGameVolume } from "../services/emulatorBridge";
 import { resolveTranslationLanguages } from "../services/translationService";
 
 // Module-level guard prevents React StrictMode double-mount from triggering
@@ -89,15 +90,25 @@ export const EmulatorView: React.FC<EmulatorViewProps> = ({
   onWordClick,
 }) => {
   const [headerVisible, setHeaderVisible] = React.useState(true);
-  const [showRestartConfirm, setShowRestartConfirm] = React.useState(false);
   const [showHomeConfirm, setShowHomeConfirm] = React.useState(false);
+  const [restarting, setRestarting] = React.useState(false);
+  const [textBoxVisible, setTextBoxVisible] = React.useState(true); // show/hide text box (feature stays enabled)
   const hideTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
+
+  // When the text overlay feature is re-enabled from settings, reset visibility to shown
+  React.useEffect(() => {
+    if (uiState.textOverlayOpen) {
+      setTextBoxVisible(true);
+    }
+  }, [uiState.textOverlayOpen]);
 
   // 游戏模拟器状态
   const [gameLoading, setGameLoading] = React.useState(false);
   const [loadProgress, setLoadProgress] = React.useState(0);
   const [loadMessage, setLoadMessage] = React.useState('');
   const [gameText, setGameText] = React.useState('');
+  const [gameHistory, setGameHistory] = React.useState<Array<{ id: number; text: string }>>([]);
+  const [showHistoryPanel, setShowHistoryPanel] = React.useState(false);
   const iframeRef = React.useRef<HTMLIFrameElement | null>(null);
   const textPollTimerRef = React.useRef<NodeJS.Timeout | null>(null);
   const gameContainerRef = React.useRef<HTMLDivElement | null>(null);
@@ -160,13 +171,66 @@ export const EmulatorView: React.FC<EmulatorViewProps> = ({
       }
 
       if (text && text.trim()) {
+        const trimmed = text.trim();
         setGameText(text);
-        setUIState({ dictionarySentence: text.trim() });
+        setUIState({ dictionarySentence: trimmed });
+        // Accumulate into session history (dedupe consecutive identical texts)
+        setGameHistory(prev => {
+          if (prev.length > 0 && prev[prev.length - 1].text === trimmed) return prev;
+          return [...prev, { id: Date.now(), text: trimmed }];
+        });
       }
     };
     window.addEventListener('message', handleGameText);
     return () => window.removeEventListener('message', handleGameText);
   }, [game?.id]);
+
+  // 游戏音量变更时发送到 iframe，仅影响游戏音频，不影响 TTS
+  React.useEffect(() => {
+    notifyIframeGameVolume(uiState.gameVolume);
+  }, [uiState.gameVolume]);
+
+  // 切换/重载游戏时清空历史记录
+  React.useEffect(() => {
+    setGameHistory([]);
+    setShowHistoryPanel(false);
+  }, [game?.id]);
+
+  // 直接重启游戏（跳过确认弹窗）
+  const handleRestart = React.useCallback(async () => {
+    if (restarting) return;
+    setRestarting(true);
+    // 关闭当前引擎
+    shutdownGame();
+    const container = gameContainerRef.current || document.getElementById('game-container');
+    if (container) container.innerHTML = '';
+    iframeRef.current = null;
+    _emulatorLoading = false;
+    setGameText('');
+    setGameHistory([]);
+    setShowHistoryPanel(false);
+    // 立即重新加载
+    _emulatorLoading = true;
+    setGameLoading(true);
+    setLoadProgress(0);
+    setLoadMessage('正在重启游戏引擎...');
+    try {
+      const result = await loadAndBootGame(game.id, container!, (pct, msg) => {
+        setLoadProgress(pct);
+        setLoadMessage(msg);
+      }, game.system);
+      if (result.success && result.iframe) {
+        iframeRef.current = result.iframe;
+      } else {
+        alert('游戏重启失败: ' + (result.error || '未知错误'));
+      }
+    } catch (e: any) {
+      alert('游戏重启异常: ' + (e.message || '未知错误'));
+    } finally {
+      setGameLoading(false);
+      setRestarting(false);
+    }
+  }, [game, restarting]);
 
   // 当进入游戏界面时，启动模拟器引擎
   React.useEffect(() => {
@@ -494,11 +558,11 @@ export const EmulatorView: React.FC<EmulatorViewProps> = ({
               className={`w-[1px] h-6 mx-1 ${isLight ? "bg-slate-350/50" : "bg-white/10"}`}
             />
 
-            {/* Restart game is now moved immediately to the left of Home button */}
+            {/* Restart game — direct restart, no confirmation */}
             <HeaderAction
               icon={<Power size={14} />}
               label="重启游戏"
-              onClick={() => setShowRestartConfirm(true)}
+              onClick={handleRestart}
               danger
               isIconOnly
               isLight={isLight}
@@ -517,36 +581,48 @@ export const EmulatorView: React.FC<EmulatorViewProps> = ({
 
         {/* Floating Bottom HUD */}
         <div className="pointer-events-none px-4 md:px-10 pb-4 md:pb-6 flex flex-col gap-4">
-          {/* Bottom Right Text Overlay Toggle */}
+          {/* Bottom Right Text Overlay Toggle — only visible when text mask feature is enabled */}
+          {uiState.textOverlayOpen && (
           <div className="flex justify-end pointer-events-auto">
             <button
-              onClick={() =>
-                setUIState({ textOverlayOpen: !uiState.textOverlayOpen })
-              }
+              onClick={() => setTextBoxVisible(!textBoxVisible)}
               className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all border ${
-                uiState.textOverlayOpen
+                textBoxVisible
                   ? "bg-cyan-500 border-cyan-500 text-black shadow-lg shadow-cyan-500/20"
                   : isLight
                     ? "bg-white border-slate-200 text-slate-500 hover:text-slate-800 hover:bg-slate-50 shadow-sm"
                     : "bg-white/5 border-white/5 text-slate-500 hover:text-white"
               }`}
-              title="剧情文本"
+              title={textBoxVisible ? "隐藏剧情文本" : "显示剧情文本"}
             >
               <FileText size={18} />
             </button>
           </div>
+          )}
         </div>
       </div>
 
       {/* LAYER 3: Side Panel (High Z-Index) moved to root in App.tsx */}
 
-      {/* LAYER 4: Dynamic Overlays (e.g., Subtitles/Text) */}
+      {/* LAYER 4: Dynamic Overlays (e.g., Subtitles/Text, History) */}
       <div className="absolute inset-x-0 bottom-0 pointer-events-none z-40 flex flex-col items-center">
+        {/* History Panel — floats above the text overlay */}
+        <HistoryPanel
+          isOpen={showHistoryPanel}
+          onClose={() => setShowHistoryPanel(false)}
+          history={gameHistory}
+          theme={uiState.theme}
+          fontSize={uiState.textOverlayFontSize}
+          ttsEnabled={uiState.ttsEnabled}
+          ttsVoice={uiState.ttsVoice}
+          ttsSpeed={uiState.ttsSpeed}
+          ttsPitch={uiState.ttsPitch}
+          ttsVolume={uiState.ttsVolume}
+        />
+
         <TextOverlay
-          isOpen={uiState.textOverlayOpen}
-          onToggle={() =>
-            setUIState({ textOverlayOpen: !uiState.textOverlayOpen })
-          }
+          isOpen={uiState.textOverlayOpen && textBoxVisible}
+          onToggle={() => setTextBoxVisible(false)}
           opacity={uiState.textOverlayOpacity}
           fontSize={uiState.textOverlayFontSize}
           autoUpdate={uiState.autoUpdateText}
@@ -586,33 +662,11 @@ export const EmulatorView: React.FC<EmulatorViewProps> = ({
           ttsPitch={uiState.ttsPitch}
           ttsVolume={uiState.ttsVolume}
           showHistory={uiState.showHistory}
-          onHistoryClick={() => alert("剧情对话历史记录管理系统已载入。此处可管理以往全部对话缓存数据。")}
+          onHistoryClick={() => setShowHistoryPanel(true)}
           translationSourceLang={translationLangs.sourceLang}
           translationTargetLang={translationLangs.targetLang}
         />
       </div>
-
-      {/* Restart Game confirmation modal overlay */}
-      <ConfirmModal
-        isOpen={showRestartConfirm}
-        title="确认重启游戏"
-        message="确认要重启当前的模拟运行引擎吗？这将会使系统重置到初始加载状态，您所有未保存的测试动作与场景缓存都将丢失。"
-        confirmText="确认重启"
-        cancelText="取消"
-        onConfirm={() => {
-          setShowRestartConfirm(false);
-          // 完全关闭当前游戏
-          shutdownGame();
-          const container = gameContainerRef.current || document.getElementById('game-container');
-          if (container) container.innerHTML = '';
-          iframeRef.current = null;
-          _emulatorLoading = false;
-          setGameText('');
-          alert("模拟核心成功复位！请返回大厅重新选择游戏以继续游玩。");
-        }}
-        onCancel={() => setShowRestartConfirm(false)}
-        theme={uiState.theme}
-      />
 
       {/* Exit to Home confirmation modal overlay */}
       <ConfirmModal

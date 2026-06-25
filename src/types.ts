@@ -146,6 +146,8 @@ export interface UIState {
   segmentationMode: 'none' | 'browser' | 'space' | 'char' | 'japanese';
   lookupMode: 'click' | 'yomitan';
   clickLookupSource: 'local' | 'api' | 'all';
+  /** 词典查询语言跟随模式: 'game' = 跟随游戏语言, 'learning' = 跟随学习语言设置 */
+  dictionaryLanguageMode: 'game' | 'learning';
   lemmatizationEnabled: boolean;
   lemmatizationLanguages: string[];
   lemmatizationExternalRules: { id: string; name: string; date: string }[];

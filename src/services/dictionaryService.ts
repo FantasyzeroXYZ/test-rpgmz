@@ -2,7 +2,7 @@
  * dictionaryService.ts — 词典查词服务
  * ============================================================================
  * 整合多源词典查询，支持：
- * - 本地离线词典（OFFLINE_DICTIONARY）
+ * - 本地词典（Yomitan 导入的真实词典）
  * - Free Dictionary API (https://api.dictionaryapi.dev/)
  * - 可扩展的其他词典源
  *
@@ -13,6 +13,7 @@
  * - 查询缓存
  */
 import { translateText, TranslationResult } from './translationService';
+import { queryYomitanTerm } from './yomitanDictService';
 
 // ============================================================================
 // 词典查询结果类型
@@ -39,70 +40,6 @@ export interface DictionaryDefinition {
 
 const lookupCache = new Map<string, DictionaryResult>();
 const CACHE_MAX_SIZE = 300;
-
-// ============================================================================
-// 本地词典
-// ============================================================================
-
-/** 内置离线词典（可扩展） */
-const OFFLINE_DICT: Record<string, DictionaryResult> = {
-  'session': {
-    word: 'session',
-    phonetic: '/ˈseʃ.ən/',
-    definitions: [
-      { partOfSpeech: 'noun', definition: '会话; 会议; 一场活动。在模拟器中特指当前挂载并已激活的游戏内核运行实例。' },
-    ],
-    source: 'local',
-  },
-  'active': {
-    word: 'active',
-    phonetic: '/ˈæk.tɪv/',
-    definitions: [
-      { partOfSpeech: 'adjective', definition: '活跃的; 运行中的; 起作用的。在系统监控日志中，表示模拟内核、图形管线及音频输出均正常运作。' },
-    ],
-    source: 'local',
-  },
-  'resource': {
-    word: 'resource',
-    phonetic: '/rɪˈzɔːs/',
-    definitions: [
-      { partOfSpeech: 'noun', definition: '资源; 财力; 资产。指CPU线程、GPU着色器、内存显存缓存等硬件分配给游戏的底层物理耗能。' },
-    ],
-    source: 'local',
-  },
-  'graphics': {
-    word: 'graphics',
-    phonetic: '/ˈɡræf.ɪks/',
-    definitions: [
-      { partOfSpeech: 'noun', definition: '图形学; 图表; 图像数据。指游戏内的图形像素输出模块，管理高清滤镜渲染及二值化显示。' },
-    ],
-    source: 'local',
-  },
-  'pipeline': {
-    word: 'pipeline',
-    phonetic: '/ˈpaɪp.laɪn/',
-    definitions: [
-      { partOfSpeech: 'noun', definition: '管道; 着色器管线; 流水线。控制着游戏画面从ROM芯片图像源传输到渲染器，最终投射在屏幕的过程。' },
-    ],
-    source: 'local',
-  },
-  'system': {
-    word: 'system',
-    phonetic: '/ˈsɪs.təm/',
-    definitions: [
-      { partOfSpeech: 'noun', definition: '系统; 操作系统; 体系规划。特指搭载了翻译、存档、手柄以及智能OCR插件的通用AI Studio仿真大厅运行栈。' },
-    ],
-    source: 'local',
-  },
-  'game': {
-    word: 'game',
-    phonetic: '/ɡeɪm/',
-    definitions: [
-      { partOfSpeech: 'noun', definition: '游戏; 娱乐场景; 交互式多媒体。指代当前启动或配置好的任何可视化文字冒险或模拟游戏 ROM 游戏卡带。' },
-    ],
-    source: 'local',
-  },
-};
 
 // ============================================================================
 // Free Dictionary API 查询
@@ -188,10 +125,10 @@ export async function lookupWord(
   let result: DictionaryResult;
 
   if (source === 'local') {
-    // 仅本地词典
-    const localEntry = OFFLINE_DICT[cleanWord];
-    if (localEntry) {
-      result = { ...localEntry };
+    // 仅本地词典：先查 Yomitan 导入词典
+    const yomitanResult = await queryYomitanTerm(cleanWord);
+    if (yomitanResult) {
+      result = yomitanResult;
     } else if (localDict?.[cleanWord]) {
       result = {
         word: cleanWord,
@@ -210,23 +147,25 @@ export async function lookupWord(
     // 仅 API
     result = await queryFreeDictionaryAPI(cleanWord);
   } else {
-    // 全部：先取本地，再并发 API
-    const localEntry = OFFLINE_DICT[cleanWord];
-    const apiResult = await queryFreeDictionaryAPI(cleanWord);
+    // 全部：Yomitan 本地 + API 并发
+    const [yomitanResult, apiResult] = await Promise.all([
+      queryYomitanTerm(cleanWord),
+      queryFreeDictionaryAPI(cleanWord),
+    ]);
 
-    if (localEntry && apiResult.definitions.length > 0) {
+    if (yomitanResult && apiResult.definitions.length > 0) {
       // 合并：本地定义 + API 定义
       result = {
         word: cleanWord,
-        phonetic: apiResult.phonetic || localEntry.phonetic,
+        phonetic: apiResult.phonetic || yomitanResult.phonetic,
         definitions: [
-          ...localEntry.definitions,
+          ...yomitanResult.definitions,
           ...apiResult.definitions,
         ],
         source: 'combined',
       };
-    } else if (localEntry) {
-      result = { ...localEntry };
+    } else if (yomitanResult) {
+      result = yomitanResult;
     } else if (apiResult.definitions.length > 0) {
       result = apiResult;
     } else {
@@ -234,12 +173,14 @@ export async function lookupWord(
     }
   }
 
-  // 写入缓存
-  if (lookupCache.size >= CACHE_MAX_SIZE) {
-    const keys = [...lookupCache.keys()];
-    keys.slice(0, Math.floor(CACHE_MAX_SIZE / 2)).forEach(k => lookupCache.delete(k));
+  // Only cache successful results — never cache errors/empty
+  if (!result.error && result.definitions.length > 0) {
+    if (lookupCache.size >= CACHE_MAX_SIZE) {
+      const keys = [...lookupCache.keys()];
+      keys.slice(0, Math.floor(CACHE_MAX_SIZE / 2)).forEach(k => lookupCache.delete(k));
+    }
+    lookupCache.set(cacheKey, result);
   }
-  lookupCache.set(cacheKey, result);
 
   return result;
 }
