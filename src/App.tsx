@@ -118,7 +118,7 @@ export default function App() {
     vocabPage: 1,
     ttsEnabled: false,
     ttsSource: 'browser',
-    ttsVoice: 'en-US-Standard-C',
+    ttsVoice: '',
     ttsSpeed: 1.0,
     ttsPitch: 1.0,
     ttsVolume: 0.8,

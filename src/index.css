@@ -50,3 +50,19 @@
   height: 100vh;
   height: 100dvh;
 }
+
+/*
+  Fix <select> dropdown option visibility in dark mode.
+  <option> elements inherit text color from the dark-themed <select>
+  (white / slate-200) but the browser renders the dropdown popup with
+  the OS light background → white text on white = invisible.
+  Only the hovered option (system blue highlight) is readable.
+
+  Explicit dark background + light text on options makes all entries
+  visible regardless of the parent select's text color.
+*/
+select option,
+select optgroup {
+  background-color: #0f172a; /* slate-900 */
+  color: #e2e8f0;            /* slate-200 */
+}

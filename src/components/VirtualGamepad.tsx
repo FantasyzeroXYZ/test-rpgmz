@@ -86,13 +86,15 @@ export const VirtualGamepad: React.FC<VirtualGamepadProps> = ({
   };
 
   /**
-   * 发送输入：优先设置 Input._currentState（legacy 方式），
-   * 同时派发键盘事件以兼容监听原生键盘事件的插件。
+   * 发送输入：
+   * - D-Pad 方向键：Input._currentState 只用按钮名查找（不受 mappings 干扰）
+   * - 动作键：Input._currentState 只用按钮名查找
+   * - mappings（键盘映射）仅用于派发 KeyboardEvent，不影响 RPG 输入状态
    */
   const sendInput = (btn: string, pressed: boolean) => {
-    // 1. Legacy 方式：直接操作 RPG Maker 的 Input._currentState
-    const mappedKey = getMappedKey(btn);
-    const rpgKey = RPG_INPUT_MAP[mappedKey] || RPG_INPUT_MAP[btn];
+    // 1. 直接操作 RPG Maker 的 Input._currentState
+    //    只用按钮名查 RPG_INPUT_MAP，不用 mappedKey（mappedKey 是键盘事件用的）
+    const rpgKey = RPG_INPUT_MAP[btn];
     if (rpgKey) {
       try {
         const win = getIframeWindow();
@@ -109,14 +111,13 @@ export const VirtualGamepad: React.FC<VirtualGamepadProps> = ({
       if (keyMap && keyMap[btn]) {
         dispatchKeyEvent(keyMap[btn], pressed ? 'keydown' : 'keyup');
       }
+      return; // D-Pad 只走键盘事件通道，不走 mappings
     }
 
-    // 3. 非 D-Pad 按钮根据 mappings 派发键盘事件（同样支持长按）
-    if (!['U', 'D', 'L', 'R'].includes(btn)) {
-      const key = getMappedKey(btn);
-      if (key) {
-        dispatchKeyEvent(key, pressed ? 'keydown' : 'keyup');
-      }
+    // 3. 非 D-Pad 按钮：先 Input._currentState（上面已设），再根据 mappings 派发键盘事件
+    const key = getMappedKey(btn);
+    if (key) {
+      dispatchKeyEvent(key, pressed ? 'keydown' : 'keyup');
     }
   };
 

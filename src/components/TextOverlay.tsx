@@ -71,7 +71,7 @@ export const TextOverlay: React.FC<TextOverlayProps> = ({
   ttsEnabled = false,
   ttsAutoPlay = true,
   onToggleTtsAutoPlay,
-  ttsVoice = 'en-US-Standard-C',
+  ttsVoice = '',
   ttsSpeed = 100,
   ttsPitch = 100,
   ttsVolume = 80,
@@ -91,25 +91,27 @@ export const TextOverlay: React.FC<TextOverlayProps> = ({
     if ('speechSynthesis' in window && textToSpeak) {
       window.speechSynthesis.cancel();
       const utterance = new SpeechSynthesisUtterance(textToSpeak);
-      
-      // Attempt to find actual voice if specified
+
+      // 使用存储的实际语音名称（空字符串 = 系统默认）
       if (ttsVoice) {
         const voices = window.speechSynthesis.getVoices();
-        const selectedVoice = voices.find(v => v.name === ttsVoice || v.lang === ttsVoice);
+        const selectedVoice = voices.find(
+          v => v.name === ttsVoice || v.voiceURI === ttsVoice
+        );
         if (selectedVoice) {
           utterance.voice = selectedVoice;
         }
       }
-      
+
       // Determine rate, pitch, volume safely supporting both decimal/percentage
       const rate = ttsSpeed <= 2 ? ttsSpeed : ttsSpeed / 100;
       const pitch = ttsPitch <= 2 ? ttsPitch : ttsPitch / 100;
       const volume = ttsVolume <= 1 ? ttsVolume : ttsVolume / 100;
-      
+
       utterance.rate = rate;
       utterance.pitch = pitch;
       utterance.volume = volume;
-      
+
       window.speechSynthesis.speak(utterance);
     }
   }, [ttsVoice, ttsSpeed, ttsPitch, ttsVolume]);

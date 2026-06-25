@@ -43,6 +43,9 @@ import { recognizeImage, OCRProgress } from "../services/ocrService";
 import { isJapaneseTokenizerReady } from "../services/tokenizerService";
 // 数据持久化
 import { exportAllDataAsJSON } from "../services/storageService";
+import { detectSaveFiles, SaveFileEntry, getVfsInstance, injectSaveFile, notifyIframeRefreshSaves } from "../services/emulatorBridge";
+import localforage from 'localforage';
+import { getAvailableVoices, groupVoicesByLanguage, VoiceGroup, speakTTS } from "../services/ttsService";
 
 interface PanelProps {
   isOpen: boolean;
@@ -381,6 +384,35 @@ const EnhancedSettings = ({
 }) => {
   const isLight = uiState.theme === "light";
   const [ttsTestText, setTtsTestText] = React.useState("");
+  const [voiceGroups, setVoiceGroups] = React.useState<VoiceGroup[]>([]);
+  const [voicesLoading, setVoicesLoading] = React.useState(false);
+
+  // 加载浏览器可用语音（处理 Chrome 异步加载）
+  const loadVoices = React.useCallback(async () => {
+    setVoicesLoading(true);
+    try {
+      const voices = await getAvailableVoices();
+      setVoiceGroups(groupVoicesByLanguage(voices));
+    } catch (e) {
+      console.warn('[TTS] 获取语音列表失败:', e);
+    } finally {
+      setVoicesLoading(false);
+    }
+  }, []);
+
+  React.useEffect(() => {
+    loadVoices();
+    // Chrome 在 voiceschanged 事件后才返回完整列表
+    const onVoicesChanged = () => { loadVoices(); };
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      window.speechSynthesis.addEventListener('voiceschanged', onVoicesChanged);
+    }
+    return () => {
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        window.speechSynthesis.removeEventListener('voiceschanged', onVoicesChanged);
+      }
+    };
+  }, [loadVoices]);
 
   const handleTestTTS = () => {
     if (!ttsTestText.trim()) return;
@@ -391,40 +423,15 @@ const EnhancedSettings = ({
         );
         return;
       }
-      const utterance = new SpeechSynthesisUtterance(ttsTestText);
-      utterance.rate = uiState.ttsSpeed / 100;
-      utterance.pitch = uiState.ttsPitch / 100;
-      utterance.volume = uiState.ttsVolume / 100;
-
-      if (window.speechSynthesis) {
-        const voices = window.speechSynthesis.getVoices();
-        let targetVoice = null;
-        if (
-          uiState.ttsVoice === "female-jp" ||
-          uiState.ttsVoice === "male-jp"
-        ) {
-          targetVoice = voices.find(
-            (v) => v.lang.includes("ja") || v.lang.includes("JP"),
-          );
-        } else if (uiState.ttsVoice === "female-zh") {
-          targetVoice = voices.find(
-            (v) =>
-              v.lang.includes("zh") ||
-              v.lang.includes("ZH") ||
-              v.lang.includes("cn") ||
-              v.lang.includes("CN"),
-          );
-        }
-        if (targetVoice) {
-          utterance.voice = targetVoice;
-        }
-        window.speechSynthesis.cancel(); // cancel current speak
-        window.speechSynthesis.speak(utterance);
-      } else {
-        alert(`您的浏览器不支持原生语音合成。朗读文本: "${ttsTestText}"`);
-      }
+      // 使用统一的 speakTTS 接口
+      speakTTS(ttsTestText, {
+        voiceName: uiState.ttsVoice || '',
+        rate: uiState.ttsSpeed / 100,
+        pitch: uiState.ttsPitch / 100,
+        volume: uiState.ttsVolume / 100,
+      });
     } catch (e) {
-      console.error(e);
+      console.error('[TTS] 测试朗读失败:', e);
     }
   };
 
@@ -939,21 +946,58 @@ const EnhancedSettings = ({
                   </div>
 
                   <div className="space-y-1.5 flex flex-col gap-1">
-                    <span
-                      className={`text-[10px] font-bold uppercase tracking-wider ${isLight ? "text-slate-505" : "text-slate-400"}`}
-                    >
-                      朗读发音人音色
-                    </span>
+                    <div className="flex items-center justify-between">
+                      <span
+                        className={`text-[10px] font-bold uppercase tracking-wider ${isLight ? "text-slate-505" : "text-slate-400"}`}
+                      >
+                        朗读发音人音色
+                      </span>
+                      <button
+                        onClick={loadVoices}
+                        disabled={voicesLoading}
+                        className={`p-1 rounded-md transition-colors ${
+                          voicesLoading
+                            ? 'text-slate-500 cursor-not-allowed'
+                            : isLight
+                              ? 'text-slate-400 hover:text-cyan-600 hover:bg-cyan-50'
+                              : 'text-slate-500 hover:text-cyan-400 hover:bg-white/5'
+                        }`}
+                        title="刷新语音列表"
+                      >
+                        <RefreshCw size={11} className={voicesLoading ? 'animate-spin' : ''} />
+                      </button>
+                    </div>
                     <select
                       value={uiState.ttsVoice}
                       onChange={(e) => setUIState({ ttsVoice: e.target.value })}
                       className={`w-full rounded-xl py-2 px-3 text-xs outline-none transition-all font-sans font-semibold border ${isLight ? "bg-slate-50 border-slate-200 text-slate-808" : "bg-white/5 border-white/10 text-white bg-[#0e121a]"}`}
                     >
-                      <option value="system">系统默认发音</option>
-                      <option value="female-jp">日语轻快女声 (Sayaka)</option>
-                      <option value="male-jp">日语低沉男声 (Kenji)</option>
-                      <option value="female-zh">中文柔和女声 (Lili)</option>
+                      <option value="">🎙 系统默认发音</option>
+                      {voiceGroups.length === 0 && !voicesLoading && (
+                        <option value="" disabled>
+                          ─ 未检测到语音（点击 🔄 刷新）─
+                        </option>
+                      )}
+                      {voiceGroups.map((group) => (
+                        <optgroup key={group.langCode} label={`${group.langLabel} (${group.voices.length})`}>
+                          {group.voices.map((v) => (
+                            <option key={v.voiceURI} value={v.name}>
+                              {v.name}{v.default ? '  ★' : ''}{v.localService ? '' : ' 🌐'}
+                            </option>
+                          ))}
+                        </optgroup>
+                      ))}
                     </select>
+                    <p className={`text-[9px] leading-relaxed ${isLight ? 'text-slate-400' : 'text-slate-600'}`}>
+                      ★ 系统默认语音　🌐 云端语音（需联网）
+                      <button
+                        onClick={loadVoices}
+                        className={`underline hover:text-cyan-500 ${voicesLoading ? 'cursor-not-allowed text-slate-500' : ''}`}
+                        disabled={voicesLoading}
+                      >
+                        {voicesLoading ? '检测中…' : `已检测 ${voiceGroups.reduce((s, g) => s + g.voices.length, 0)} 个语音`}
+                      </button>
+                    </p>
                   </div>
                   <div className="space-y-2">
                     <div className="flex justify-between items-center text-[10px] font-bold">
@@ -2612,36 +2656,136 @@ const SaveList = ({
   uiState: UIState;
   setUIState: (s: Partial<UIState>) => void;
 }) => {
-  const [isDownloading, setIsDownloading] = React.useState(false);
+  const [saves, setSaves] = React.useState<SaveFileEntry[]>([]);
   const [isDetecting, setIsDetecting] = React.useState(false);
   const [feedback, setFeedback] = React.useState<string | null>(null);
 
-  const filteredSaves = MOCK_SAVES.filter((save) => {
+  const doDetect = React.useCallback(async () => {
+    try { const entries = await detectSaveFiles(); setSaves(entries); } catch {}
+  }, []);
+
+  React.useEffect(() => {
+    doDetect();
+    const timer = setInterval(doDetect, 5000);
+    const onMsg = (e: MessageEvent) => {
+      if (e.data?.source === 'iframe-game' && e.data?.type === 'save-updated') doDetect();
+    };
+    window.addEventListener('message', onMsg);
+    return () => { clearInterval(timer); window.removeEventListener('message', onMsg); };
+  }, [doDetect]);
+
+  const filteredSaves = saves.filter((s) => {
     if (uiState.activeSaveCategory === "ALL") return true;
-    if (uiState.activeSaveCategory === "GLOBAL") return save.type === "global";
-    if (uiState.activeSaveCategory === "AUTO") return save.type === "auto";
-    if (uiState.activeSaveCategory === "MANUAL") return save.type === "manual";
+    if (uiState.activeSaveCategory === "GLOBAL") return s.name.toLowerCase().includes('global');
+    if (uiState.activeSaveCategory === "AUTO") return s.name === 'file0';
+    if (uiState.activeSaveCategory === "MANUAL") return s.name !== 'file0' && !s.name.toLowerCase().includes('global');
     return true;
   });
 
-  const handleDownloadAll = () => {
-    setIsDownloading(true);
-    setFeedback("正在打包全部 4 个存档...");
-    setTimeout(() => {
-      setIsDownloading(false);
-      setFeedback("✅ 成功下载全部存档 (.zip)！");
+  const handleDownloadOne = async (entry: SaveFileEntry) => {
+    try {
+      let data: any = null;
+      if (entry.storage === 'localforage') {
+        data = await localforage.getItem(entry.key);
+      } else if (entry.storage === 'localStorage') {
+        data = localStorage.getItem(entry.key);
+      } else if (entry.storage === 'vfs') {
+        const vfs = getVfsInstance();
+        if (vfs) data = vfs.readRawFile(entry.key);
+      }
+      if (!data) { setFeedback("⚠️ 无法读取存档数据"); setTimeout(() => setFeedback(null), 3000); return; }
+      const blob = new Blob([data], { type: 'application/octet-stream' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = entry.name + '.rmmzsave';
+      a.click(); URL.revokeObjectURL(url);
+      setFeedback(`✅ 已下载 ${entry.label}`);
       setTimeout(() => setFeedback(null), 3000);
-    }, 1200);
+    } catch (e: any) { setFeedback("下载失败: " + e.message); setTimeout(() => setFeedback(null), 3000); }
   };
 
-  const handleDetectSaves = () => {
+  const handleDownloadAll = async () => {
+    for (const entry of saves) {
+      try {
+        let data: any = null;
+        if (entry.storage === 'localforage') {
+          data = await localforage.getItem(entry.key);
+        } else if (entry.storage === 'localStorage') {
+          data = localStorage.getItem(entry.key);
+        } else if (entry.storage === 'vfs') {
+          const vfs = getVfsInstance();
+          if (vfs) data = vfs.readRawFile(entry.key);
+        }
+        if (!data) continue;
+        const blob = new Blob([data], { type: 'application/octet-stream' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = entry.name + '.rmmzsave';
+        a.click(); URL.revokeObjectURL(url);
+      } catch {}
+    }
+    setFeedback("✅ 已下载全部存档");
+    setTimeout(() => setFeedback(null), 3000);
+  };
+
+  const handleDeleteOne = async (entry: SaveFileEntry) => {
+    try {
+      if (entry.storage === 'localforage') await localforage.removeItem(entry.key);
+      else if (entry.storage === 'localStorage') localStorage.removeItem(entry.key);
+      setFeedback("✅ 已删除"); await doDetect();
+      setTimeout(() => setFeedback(null), 2500);
+    } catch (e: any) { setFeedback("删除失败: " + e.message); }
+  };
+
+  const handleDetectSaves = async () => {
     setIsDetecting(true);
-    setFeedback("正在同步重新扫描系统存档...");
-    setTimeout(() => {
-      setIsDetecting(false);
-      setFeedback("✅ 存档扫描更新完毕，检测到最新备份！");
+    await doDetect();
+    setIsDetecting(false);
+    setFeedback(`✅ 扫描完成，共 ${saves.length} 个存档`);
+    setTimeout(() => setFeedback(null), 2500);
+  };
+
+  const saveFileInputRef = React.useRef<HTMLInputElement | null>(null);
+
+  const handleImportSave = () => {
+    saveFileInputRef.current?.click();
+  };
+
+  const handleSaveFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    // 验证文件扩展名
+    const nameLower = file.name.toLowerCase();
+    if (!nameLower.endsWith('.rmmzsave') && !nameLower.endsWith('.rpgsave')) {
+      setFeedback('⚠️ 仅支持 .rmmzsave 或 .rpgsave 格式的存档文件');
+      setTimeout(() => setFeedback(null), 4000);
+      e.target.value = '';
+      return;
+    }
+    // 检测是否覆盖 auto/global 存档
+    const saveName = file.name.replace(/\.rmmzsave$/i, '').replace(/\.rpgsave$/i, '');
+    const isAutoOrGlobal = /^(global|file0)$/i.test(saveName);
+    if (isAutoOrGlobal) {
+      setFeedback(`⚠️ 正在覆盖${/global/i.test(saveName) ? '全局' : '自动'}存档: ${saveName}`);
       setTimeout(() => setFeedback(null), 3000);
-    }, 1000);
+    }
+    // 导入
+    try {
+      const result = await injectSaveFile(file.name, await file.arrayBuffer());
+      if (result.success) {
+        // 通知 iframe 中的游戏引擎刷新存档列表
+        notifyIframeRefreshSaves();
+        await doDetect();
+        setFeedback(`✅ 存档已导入: ${saveName}`);
+      } else {
+        setFeedback(`❌ 导入失败: ${result.message}`);
+      }
+    } catch (err: any) {
+      console.error('[SaveList] 导入存档异常:', err);
+      setFeedback(`❌ 导入异常: ${err.message}`);
+    }
+    setTimeout(() => setFeedback(null), 4000);
+    e.target.value = '';
   };
 
   const isLight = uiState.theme === "light";
@@ -2694,18 +2838,14 @@ const SaveList = ({
       <div className="grid grid-cols-2 gap-2">
         <button
           onClick={handleDownloadAll}
-          disabled={isDownloading}
           className={`flex items-center justify-center gap-1.5 py-2.5 rounded-xl border text-[9px] font-black uppercase tracking-wider transition-all select-none ${
-            isDownloading
-              ? "bg-cyan-500/10 border-cyan-500/20 text-cyan-500/50 cursor-not-allowed"
-              : isLight
-                ? "bg-white hover:bg-slate-50 border-slate-250 text-slate-650"
-                : "bg-white/5 hover:bg-white/10 border-white/10 text-slate-350"
+            isLight
+              ? "bg-white hover:bg-slate-50 border-slate-250 text-slate-650"
+              : "bg-white/5 hover:bg-white/10 border-white/10 text-slate-350"
           }`}
         >
           <Download
             size={11}
-            className={isDownloading ? "animate-bounce" : ""}
           />
           下载全部存档
         </button>
@@ -2726,7 +2866,16 @@ const SaveList = ({
         </button>
       </div>
 
+      {/* 隐藏的存档文件选择器 */}
+      <input
+        ref={saveFileInputRef}
+        type="file"
+        accept=".rmmzsave,.rpgsave"
+        style={{ display: 'none' }}
+        onChange={handleSaveFileChange}
+      />
       <button
+        onClick={handleImportSave}
         className={`w-full border border-dashed rounded-xl py-3 text-[9px] font-black transition-all uppercase tracking-widest ${
           isLight
             ? "bg-slate-50/50 border-slate-250 text-slate-500 hover:border-slate-350 hover:text-slate-800"
@@ -2742,9 +2891,9 @@ const SaveList = ({
             此分类暂无存档
           </p>
         ) : (
-          filteredSaves.map((save) => (
+          filteredSaves.map((entry) => (
             <div
-              key={save.id}
+              key={entry.key}
               className={`p-3 border rounded-xl flex items-center justify-between group transition-all ${
                 isLight
                   ? "bg-slate-50 hover:bg-slate-100/70 border-slate-200"
@@ -2755,9 +2904,9 @@ const SaveList = ({
                 <div className="flex items-center gap-2 mb-0.5">
                   <span
                     className={`w-1.5 h-1.5 rounded-full ${
-                      save.type === "global"
+                      entry.name.toLowerCase().includes('global')
                         ? "bg-purple-500"
-                        : save.type === "auto"
+                        : entry.name === 'file0'
                           ? "bg-green-500"
                           : "bg-blue-500"
                     }`}
@@ -2765,22 +2914,18 @@ const SaveList = ({
                   <p
                     className={`text-[11px] font-bold truncate ${isLight ? "text-slate-800" : "text-white"}`}
                   >
-                    {save.name}
+                    {entry.label}
                   </p>
                 </div>
                 <p
                   className={`text-[9px] font-mono italic ${isLight ? "text-slate-450" : "text-slate-500"}`}
                 >
-                  {save.date}
+                  {entry.storage === 'vfs' ? 'VFS save/' : entry.storage === 'localforage' ? 'IndexedDB' : 'localStorage'}
                 </p>
               </div>
               <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                <IconButton icon={<Download size={14} />} isLight={isLight} />
-                <IconButton
-                  icon={<Trash2 size={14} />}
-                  danger
-                  isLight={isLight}
-                />
+                <button onClick={() => handleDownloadOne(entry)} className="p-1.5 rounded-lg hover:bg-cyan-500/10 text-slate-400 hover:text-cyan-400"><Download size={14} /></button>
+                <button onClick={() => handleDeleteOne(entry)} className="p-1.5 rounded-lg hover:bg-red-500/10 text-slate-400 hover:text-red-400"><Trash2 size={14} /></button>
               </div>
             </div>
           ))

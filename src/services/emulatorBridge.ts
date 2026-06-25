@@ -521,6 +521,94 @@ function formatSize(bytes: number): string {
 }
 
 // ============================================================================
+// 存档检测（从 localforage / localStorage / VFS save/ 目录读取）
+// ============================================================================
+
+export interface SaveFileEntry {
+  key: string;
+  name: string;
+  storage: 'localforage' | 'localStorage' | 'vfs';
+  label: string;
+}
+
+/** 扫描所有存档来源，聚合返回存档列表 */
+export async function detectSaveFiles(gameId?: string): Promise<SaveFileEntry[]> {
+  const entries: SaveFileEntry[] = [];
+  const seen = new Set<string>();
+
+  // 1. MZ: localforage 存档（键名 rmmzsave.<gameId>.<saveName>）
+  try {
+    const lfKeys: string[] = await localforage.keys();
+    const vfsGameId = gameId || (vfsInstance?.gameId) || '';
+    const prefix = `rmmzsave.${vfsGameId}.`;
+    for (const k of lfKeys) {
+      if (!k.startsWith(prefix)) continue;
+      const name = k.slice(prefix.length);
+      if (!/^(file\d+|global|config)$/i.test(name)) continue;
+      if (seen.has(name)) continue;
+      seen.add(name);
+      const num = parseInt(name.replace('file', ''));
+      const label = name.toLowerCase() === 'global' ? '🌐 全局存档'
+        : name.toLowerCase() === 'config' ? '⚙ 配置存档'
+        : num === 0 ? '🟢 自动存档'
+        : `💾 存档 ${num}`;
+      entries.push({ key: k, name, storage: 'localforage', label });
+    }
+  } catch (e) { /* localforage 不可用 */ }
+
+  // 2. MV: localStorage 存档（键名 RPG Save N 或 RPG Save global）
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (!k || !k.startsWith('RPG Save ')) continue;
+      const rawName = k.slice(9);
+      // 匹配数字编号（如 "1", "0"）或 "global"
+      if (!/^\d+$/.test(rawName) && rawName.toLowerCase() !== 'global') continue;
+      const name = /^\d+$/.test(rawName) ? 'file' + rawName : rawName;
+      if (seen.has(name)) continue;
+      seen.add(name);
+      const label = name.toLowerCase() === 'global' ? '🌐 全局存档'
+        : parseInt(rawName) === 0 ? '🟢 自动存档'
+        : `💾 存档 ${parseInt(rawName)}`;
+      entries.push({ key: k, name, storage: 'localStorage', label });
+    }
+  } catch (e) { /* localStorage 不可用 */ }
+
+  // 3. VFS save/ 目录（MZ 引擎直接写入的文件）
+  try {
+    if (vfsInstance && vfsInstance.isGameLoaded !== false) {
+      const allPaths: string[] = vfsInstance.list_paths ? vfsInstance.list_paths() : [];
+      for (const p of allPaths) {
+        const base = p.replace(/\\/g, '/');
+        if (!base.startsWith('save/')) continue;
+        const name = base.replace(/^save\//, '');
+        if (!/^(file\d+|global|config)$/i.test(name.replace(/\.[^.]+$/, ''))) continue;
+        const cleanName = name.replace(/\.[^.]+$/, '');
+        if (seen.has(cleanName)) continue;
+        seen.add(cleanName);
+        const num = parseInt(cleanName.replace('file', ''));
+        const label = cleanName.toLowerCase() === 'global' ? '🌐 全局存档'
+          : num === 0 ? '🟢 自动存档'
+          : `💾 存档 ${num}`;
+        entries.push({ key: p, name: cleanName, storage: 'vfs', label });
+      }
+    }
+  } catch (e) { /* VFS 不可用 */ }
+
+  // 按存档编号排序（file0 在前，其余数字升序，非数字末尾）
+  entries.sort((a, b) => {
+    const na = parseInt(a.name.replace('file', ''));
+    const nb = parseInt(b.name.replace('file', ''));
+    if (!isNaN(na) && !isNaN(nb)) return na - nb;
+    if (!isNaN(na)) return -1;
+    if (!isNaN(nb)) return 1;
+    return a.name.localeCompare(b.name);
+  });
+
+  return entries;
+}
+
+// ============================================================================
 // 拇指图提取（从游戏的 Title 画面截取）
 // ============================================================================
 
@@ -552,4 +640,54 @@ export async function extractThumbnail(vfs: any): Promise<string> {
     } catch (e) { /* continue */ }
   }
   return '';
+}
+
+// ============================================================================
+// 存档导入与 iframe 通信
+// ============================================================================
+
+/**
+ * 导入外部存档文件（.rmmzsave / .rpgsave）到游戏的存储后端。
+ * 委托给 VFS 实例的 injectSaveFile()，后者自动检测引擎类型和 gameId。
+ *
+ * @param fileKey  - 文件名（如 "file1.rmmzsave" 或 "global"）
+ * @param fileData - 文件原始内容（ArrayBuffer 或字符串）
+ * @returns 导入结果 { success, key, message }
+ */
+export async function injectSaveFile(
+  fileKey: string,
+  fileData: ArrayBuffer | string
+): Promise<{ success: boolean; key: string; message: string }> {
+  if (!vfsInstance) {
+    return { success: false, key: '', message: 'VFS 引擎未初始化，请先加载游戏。' };
+  }
+  if (typeof vfsInstance.injectSaveFile !== 'function') {
+    return { success: false, key: '', message: '当前 VFS 版本不支持存档导入。' };
+  }
+  try {
+    return await vfsInstance.injectSaveFile(fileKey, fileData);
+  } catch (e: any) {
+    console.error('[emulatorBridge] injectSaveFile 失败:', e);
+    return { success: false, key: '', message: `导入异常: ${e.message}` };
+  }
+}
+
+/**
+ * 向游戏 iframe 发送 refresh-saves 消息，通知引擎重新扫描存档列表。
+ * 应在外部存档导入成功后调用。
+ */
+export function notifyIframeRefreshSaves(): void {
+  const iframe = document.getElementById('game-iframe') as HTMLIFrameElement | null;
+  if (!iframe?.contentWindow) {
+    console.warn('[emulatorBridge] 无法发送 refresh-saves: iframe 不可用');
+    return;
+  }
+  try {
+    iframe.contentWindow.postMessage(
+      { source: 'host-vfs', type: 'refresh-saves' },
+      '*'
+    );
+  } catch (e: any) {
+    console.warn('[emulatorBridge] 发送 refresh-saves 失败:', e.message);
+  }
 }

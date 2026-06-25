@@ -98,7 +98,7 @@ export interface UIState {
   // TTS Configuration
   ttsEnabled: boolean;
   ttsSource: 'browser' | 'userscript';
-  ttsVoice: string;
+  ttsVoice: string;       // 浏览器语音名称（SpeechSynthesisVoice.name），空字符串=系统默认
   ttsSpeed: number;
   ttsPitch: number;
   ttsVolume: number;
