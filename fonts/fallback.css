@@ -1,0 +1,124 @@
+/**
+ * 多语言文字游戏备用字体配置
+ * ============================================================
+ * 为 RPG Maker 游戏提供中日韩英俄五语种的系统字体回退方案。
+ * 当游戏自带的字体文件无法加载时，浏览器自动使用用户系统中
+ * 预装的对应语言字体，确保文字正常渲染。
+ *
+ * 注入方式：在沙箱 iframe 的 <head> 中加载此 CSS。
+ */
+
+/* ============================================================
+   中文（简体 / 繁体）
+   ============================================================ */
+@font-face {
+  font-family: 'Game-Chinese-Fallback';
+  src: local('Microsoft YaHei'), local('微软雅黑'),
+       local('SimHei'), local('黑体'),
+       local('PingFang SC'), local('PingFang TC'),
+       local('Hiragino Sans GB'), local('冬青黑体简体中文'),
+       local('Noto Sans SC'), local('Noto Sans TC'),
+       local('Source Han Sans SC'), local('思源黑体'),
+       local('WenQuanYi Micro Hei'), local('文泉驿微米黑'),
+       local('SimSun'), local('宋体');
+}
+
+/* ============================================================
+   日文
+   ============================================================ */
+@font-face {
+  font-family: 'Game-Japanese-Fallback';
+  src: local('Meiryo'), local('メイリオ'),
+       local('Hiragino Sans'), local('ヒラギノ角ゴシック'),
+       local('Hiragino Kaku Gothic ProN'),
+       local('Yu Gothic'), local('游ゴシック'),
+       local('MS PGothic'), local('MS Pゴシック'),
+       local('Noto Sans JP'),
+       local('Source Han Sans JP'),
+       local('M+ 1m'), local('Mplus 1m'),
+       local('IPAexGothic'), local('IPA Gothic'),
+       local('Osaka');
+}
+
+/* ============================================================
+   韩文
+   ============================================================ */
+@font-face {
+  font-family: 'Game-Korean-Fallback';
+  src: local('Malgun Gothic'), local('맑은 고딕'),
+       local('Apple SD Gothic Neo'), local('애플 SD 고딕 네오'),
+       local('Nanum Gothic'), local('나눔고딕'),
+       local('NanumBarunGothic'), local('나눔바른고딕'),
+       local('Noto Sans KR'),
+       local('Source Han Sans KR'),
+       local('Gulim'), local('굴림'),
+       local('Dotum'), local('돋움');
+}
+
+/* ============================================================
+   俄文（西里尔字母）
+   ============================================================ */
+@font-face {
+  font-family: 'Game-Cyrillic-Fallback';
+  src: local('Segoe UI'),
+       local('Arial'),
+       local('Helvetica Neue'), local('Helvetica'),
+       local('Roboto'),
+       local('Noto Sans'),
+       local('PT Sans'), local('PT Serif'),
+       local('Times New Roman'),
+       local('Tahoma'),
+       local('Verdana');
+}
+
+/* ============================================================
+   英文 / 拉丁字母
+   ============================================================ */
+@font-face {
+  font-family: 'Game-Latin-Fallback';
+  src: local('Segoe UI'),
+       local('Arial'),
+       local('Helvetica Neue'), local('Helvetica'),
+       local('Roboto'),
+       local('Noto Sans'),
+       local('Verdana'),
+       local('Tahoma'),
+       local('Georgia'),
+       local('Courier New'), local('Courier'),
+       local('Consolas'), local('monospace');
+}
+
+/* ============================================================
+   通用游戏字体回退栈
+   按优先级尝试中文→日文→韩文→俄文→英文
+   ============================================================ */
+@font-face {
+  font-family: 'Game-Universal-Fallback';
+  src: local('Microsoft YaHei'),
+       local('PingFang SC'),
+       local('Meiryo'),
+       local('Hiragino Sans'),
+       local('Malgun Gothic'),
+       local('Segoe UI'),
+       local('Arial'),
+       local('Noto Sans'),
+       local('sans-serif');
+}
+
+/* ============================================================
+   将所有游戏文本元素应用回退字体
+   ============================================================ */
+body, div, span, p, h1, h2, h3, h4, h5, h6,
+button, input, select, textarea, a, li, td, th,
+.game-text, .Window_Base, .Window_Message,
+[class*="Window"], [class*="window"],
+[class*="text"], [class*="Text"] {
+  font-family:
+    'Game-Chinese-Fallback',
+    'Game-Japanese-Fallback',
+    'Game-Korean-Fallback',
+    'Game-Cyrillic-Fallback',
+    'Game-Latin-Fallback',
+    'Game-Universal-Fallback',
+    sans-serif !important;
+}

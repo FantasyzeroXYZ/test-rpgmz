@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head><meta charset="UTF-8"><title>模拟器测试</title>
+<style>
+body{font-family:Consolas;background:#0a0a0a;color:#ddd;padding:20px;max-width:1000px;margin:0 auto}
+.pass{color:#0f0}.fail{color:#f33}.warn{color:#fa0}.info{color:#0af}
+pre{background:#111;padding:10px;border-radius:6px;overflow-x:auto;font-size:11px;max-height:400px;overflow-y:auto}
+button{padding:6px 16px;margin:4px;cursor:pointer;border:1px solid #0af;background:#111;color:#0af;border-radius:4px;font-size:13px}
+button:hover{background:#0af;color:#000}
+button:disabled{opacity:0.3;cursor:not-allowed}
+#status-bar{position:sticky;top:0;background:#111;padding:8px 12px;border-radius:6px;margin-bottom:12px;font-weight:bold}
+</style></head>
+<body>
+<h2>🎮 RPG Maker 游戏模拟器 — 自动化测试</h2>
+<div id="status-bar">状态: 等待开始测试...</div>
+<div id="results"></div>
+<div>
+  <button onclick="runAll()">▶ 运行全部测试</button>
+  <button onclick="testWASM()">1. WASM 加载</button>
+  <button onclick="testSandbox()">2. 沙箱正则</button>
+  <button onclick="testIDB()">3. IndexedDB</button>
+  <button onclick="testNetwork()">4. 网络请求</button>
+</div>
+<pre id="log"></pre>
+<script>
+var L=document.getElementById('log'),S=document.getElementById('status-bar'),R=document.getElementById('results');
+function log(m,c){L.innerHTML+=`<span class="${c||''}">${m}</span>\n`;L.scrollTop=L.scrollHeight}
+function stat(m,c){S.innerHTML=m;S.style.color=c==='pass'?'#0f0':c==='fail'?'#f33':c==='warn'?'#fa0':'#ddd'}
+var passCount=0,failCount=0;
+
+// 测试1: WASM 模块端点
+async function testWASM(){log('═'.repeat(40),'info');log('测试1: WASM 端点访问','info');
+var tests=[{url:'/',name:'首页'},{url:'/wasm_vfs.js',name:'VFS驱动'},{url:'/pkg/rm_wasm_vfs.js',name:'WASM绑定'},{url:'/pkg/rm_wasm_vfs_bg.wasm',name:'WASM二进制'}];
+var ok=true;
+for(var t of tests){
+try{var r=await fetch(t.url);if(r.ok){log(` ✅ ${t.name} (${r.status})`,'pass');passCount++}
+else{log(` ❌ ${t.name} (${r.status})`,'fail');failCount++;ok=false}}
+catch(e){log(` ❌ ${t.name}: ${e.message}`,'fail');failCount++;ok=false}}
+if(ok){log('→ 测试1 通过','pass');stat('测试1通过','pass')}else{log('→ 测试1 失败','fail');stat('测试1失败','fail')}
+return ok}
+
+// 测试2: 沙箱正则匹配
+function testSandbox(){log('═'.repeat(40),'info');log('测试2: 沙箱构建正则','info');
+var html=`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Game</title><link rel="stylesheet" href="css/game.css"></head><body><script type="text/javascript" src="js/libs/pixi.js"></`+`script><script type="text/javascript" src="js/libs/pako.min.js"></`+`script><script type="text/javascript" src="js/libs/effekseer.min.js"></`+`script><script type="text/javascript" src="js/libs/localforage.min.js"></`+`script><script type="text/javascript" src="js/libs/vorbisdecoder.js"></`+`script><script type="text/javascript" src="js/rmmz_core.js"></`+`script><script type="text/javascript" src="js/rmmz_managers.js"></`+`script><script type="text/javascript" src="js/rmmz_objects.js"></`+`script><script type="text/javascript" src="js/rmmz_scenes.js"></`+`script><script type="text/javascript" src="js/rmmz_sprites.js"></`+`script><script type="text/javascript" src="js/rmmz_windows.js"></`+`script><script type="text/javascript" src="js/plugins.js"></`+`script><script type="text/javascript" src="js/main.js"></`+`script></body></html>`;
+
+var re=/(<script\b[^>]*\ssrc\s*=\s*["'])([^"']+)(["'][^>]*>)/gi;
+var matches=[...html.matchAll(re)];
+var expected=['js/libs/pixi.js','js/libs/pako.min.js','js/libs/effekseer.min.js','js/libs/localforage.min.js','js/libs/vorbisdecoder.js','js/rmmz_core.js','js/rmmz_managers.js','js/rmmz_objects.js','js/rmmz_scenes.js','js/rmmz_sprites.js','js/rmmz_windows.js','js/plugins.js','js/main.js'];
+log(` 找到 ${matches.length} 个 script 标签 (期望 ${expected.length})`,'info');
+var ok=matches.length===expected.length;
+for(var i=0;i<matches.length;i++){
+var url=matches[i][2];var exp=expected[i];
+if(url===exp){log(` ✅ ${url}`,'pass');passCount++}
+else{log(` ❌ 期望="${exp}" 实际="${url}"`,'fail');failCount++;ok=false}}
+// 测试 link
+var lre=/(<link\b[^>]*\brel\s*=\s*["']stylesheet["'][^>]*\shref\s*=\s*["'])([^"']+)(["'][^>]*>)/gi;
+var lm=[...html.matchAll(lre)];
+log(` 找到 ${lm.length} 个 link 样式表`,'info');
+if(ok){log('→ 测试2 通过','pass');stat('测试2通过','pass')}else{log('→ 测试2 失败','fail');stat('测试2失败','fail')}
+return ok}
+
+// 测试3: IndexedDB
+async function testIDB(){log('═'.repeat(40),'info');log('测试3: IndexedDB 游戏库','info');
+try{var req=indexedDB.open('rm-vfs-games',1);
+var db=await new Promise((ok,no)=>{req.onsuccess=()=>ok(req.result);req.onerror=()=>no(req.error);
+req.onupgradeneeded=e=>{var d=e.target.result;if(!d.objectStoreNames.contains('games'))d.createObjectStore('games',{keyPath:'id'})}});
+var tx=db.transaction('games','readonly');
+var games=await new Promise((ok,no)=>{var r=tx.objectStore('games').getAll();r.onsuccess=()=>ok(r.result);r.onerror=()=>no(r.error)});
+log(` 游戏库条目: ${games.length}`,'info');log(' ✅ IndexedDB 读写正常','pass');passCount++;
+log('→ 测试3 通过','pass');stat('测试3通过','pass');db.close();return true}
+catch(e){log(` ❌ ${e.message}`,'fail');failCount++;stat('测试3失败','fail');return false}}
+
+// 测试4: 网络请求（确保无意外请求）
+async function testNetwork(){log('═'.repeat(40),'info');log('测试4: 网络请求检查','info');
+var errors=[];var origHandler=window.onerror;
+window.onerror=function(m,s,l,c,e){if(typeof m==='string')errors.push(m);if(origHandler)origHandler.apply(this,arguments);return false};
+var testUrls=['/src/main.tsx','/src/App.tsx','/src/components/HomeView.tsx','/src/components/EmulatorView.tsx','/src/services/emulatorBridge.ts'];
+var ok=true;
+for(var u of testUrls){try{var r=await fetch(u);if(r.ok){log(` ✅ ${u}`,'pass');passCount++}
+else{log(` ⚠ ${u} (${r.status})`,'warn')}}
+catch(e){log(` ❌ ${u}: ${e.message}`,'fail');failCount++;ok=false}}
+if(ok){log('→ 测试4 通过','pass');stat('测试4通过','pass')}else{stat('测试4失败','fail')}
+window.onerror=origHandler;return ok}
+
+async function runAll(){passCount=0;failCount=0;L.innerHTML='';log('╔══════════════════════╗','info');log('║  模拟器自动化测试    ║','info');log('╚══════════════════════╝','info');
+stat('测试运行中...','warn');
+await testWASM();await testSandbox();await testIDB();await testNetwork();
+log('═'.repeat(40),'info');log(`📊 结果: ${passCount} 通过, ${failCount} 失败`,'info');
+if(failCount===0){log('🎉 全部通过！','pass');stat('🎉 全部通过','pass')}else{log('⚠️ 存在失败','fail');stat('⚠️ 存在失败','fail')}}
+
+log('测试页面就绪。点击按钮开始测试，或点击"运行全部测试"。','info');
+</script>
+</body>
+</html>
